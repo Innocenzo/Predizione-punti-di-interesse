@@ -61,7 +61,7 @@ var venueSchema = new Schema({
 					 specials:    [{
 														count: Number,
 														items: []
-												}], //items salva un array []
+												}],
 					 hereNow:     [{
 														count: Number,
 														summary: String,
@@ -70,11 +70,10 @@ var venueSchema = new Schema({
 																					name: String,
 																					count: Number,
 																					items: []
-																			 }]  //items salva un array []
+																			 }]
 												}],
 					referralId: String,
 					venueChains: []
-				 			//venueChains salva un array []
 	});
 
 
