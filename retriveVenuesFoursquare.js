@@ -42,7 +42,7 @@ db.once('open', function (callback) {
 
 var Schema = mongoose.Schema;
 /**
- * structure collections foursquare in mongodb
+ * structure foursquare in mongodb
  */
 var venueSchema = new Schema({
              id:  { type: String, required: true, unique: true },
