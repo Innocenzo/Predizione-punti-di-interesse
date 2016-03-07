@@ -1,14 +1,13 @@
 var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
-var parsedJSON = require('/home/enzo/Documenti/SII/simpleIS/instagram_media.json');
 
 Instagram.set('client_id', 'client_id');
 Instagram.set('client_secret', 'client_secret');
 Instagram.set('access_token', 'access_token');
 
 
-mongoose.connect('mongodb://localhost/venues');
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -249,7 +248,7 @@ stream.on('data', function (doc) {
                               idMaxVenue = {
                                               "instagramId":doc.id,
                                               "next_max_id":pagination.next_max_id
-                              };                              
+                              };
                               if(typeof pagination.next_max_id !== "undefined"){
                                 saveVenues(new MediaRecentIdMax(idMaxVenue));
                                 updateNextIdMaxVenues(doc.id,pagination.next_max_id);
