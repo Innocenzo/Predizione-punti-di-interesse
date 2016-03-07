@@ -6,7 +6,7 @@
 Costruire un dataSet recuperando i dati di utenti e punti di interessi dalle reti sociali Instagram e Foursquare, successivamente vengono utilizzati degli algoritmi per elaborare i dati. Il nostro dataSet principalmente ci offre un insieme di dati che riguardano punti di interessi vari (es bar,ristorante,ecc) e per ognuno di essi corrisponde un set di foto che diversi utenti hanno pubblicato su Instagram in quel punto di interesse. Vengono utilizzati questi dati per costruire una timeline per ogni utente, ottenendo la storia dei punti di interesse che un utente ha visitato. Utilizzando la timeline di ogni utente applichiamo un algoritmo di clustering che permette di suddividere un insieme di utenti in k gruppi sulla base dei punti di interesse.
 Nel dataSet applichiamo una  funzione di peso tf-idf (term frequency–inverse document frequency), sugli hashtag delle foto.
 
-##collections DataSet
+##Collections DataSet
 -----------------------
 * venues:  contiene i punti di interesse recuperati da foursquare per ottenere tutti i corrispondenti id instagram per identificare i luoghi.
 * instagram_venues: contiene tutti i precedenti luoghi recuperati con le rispettive proprietà (nome, latitudine, longitudine, id_foursquare).
