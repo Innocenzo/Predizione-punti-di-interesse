@@ -8,14 +8,14 @@ Nel dataSet applichiamo una  funzione di peso tf-idf (term frequency–inverse d
 
 ##Collections DataSet
 -----------------------
-* venues:  contiene i punti di interesse recuperati da foursquare per ottenere tutti i corrispondenti id instagram per identificare i luoghi.
+* **venues**:  contiene i punti di interesse recuperati da foursquare per ottenere tutti i corrispondenti id instagram per identificare i luoghi.
 
-* instagram_venues: contiene tutti i precedenti luoghi recuperati con le rispettive proprietà (nome, latitudine, longitudine, id_foursquare).
+* **instagram_venues**: contiene tutti i precedenti luoghi recuperati con le rispettive proprietà (nome, latitudine, longitudine, id_foursquare).
 
-* mediarecentvenues: ogni istanza contiene la foto di un utente che ha fatto il check-in in un certo luogo, con le relative proprietà (come per esempio utenti con le proprie informazioni, commenti,  likes e i tag della relativa foto ecc…)
+* **mediarecentvenues**: ogni istanza contiene la foto di un utente che ha fatto il check-in in un certo luogo, con le relative proprietà (come per esempio utenti con le proprie informazioni, commenti,  likes e i tag della relativa foto ecc…)
 
-* mediarecentidmaxes: contiene l'id max del punto di interesse per esplorare la timeline e recuperare foto meno recenti.(id max caratteristica implementata in Instagram per la paginazione dei dati).
+* **mediarecentidmaxes**: contiene l'id max del punto di interesse per esplorare la timeline e recuperare foto meno recenti.(id max caratteristica implementata in Instagram per la paginazione dei dati).
 
-* users: ogni istanza contiene l'id dell'utente con la rispettiva lista di tutti i luoghi visitati;
+* **users**: ogni istanza contiene l'id dell'utente con la rispettiva lista di tutti i luoghi visitati;
 
-* tfidffinals: insieme di istanze nelle quali ognuna contiene l'id di una location, con tutti i rispettivi tags di tutte le foto riferite a quella location; ogni tag inoltre è associato a un certo valore di tf-idf, calcolato usando due dataset di supporto come subroutines per il calcolo dei valori di interesse (mediarecenttags e tfidftags).
+* **tfidffinals**: insieme di istanze nelle quali ognuna contiene l'id di una location, con tutti i rispettivi tags di tutte le foto riferite a quella location; ogni tag inoltre è associato a un certo valore di tf-idf, calcolato usando due dataset di supporto come subroutines per il calcolo dei valori di interesse (mediarecenttags e tfidftags).
