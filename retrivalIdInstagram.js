@@ -13,6 +13,31 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
   // yay!
+  var stream = Venue.find({},{"id":1}).limit(4800).skip(16800).stream();
+
+  stream.on('data', function (doc) {
+    // do something with the mongoose document
+    console.log(doc.id);
+
+    Instagram.locations.search({foursquare_v2_id: doc.id,
+                                complete: function(data, pagination){
+                                readVenues(data[0],doc.id);
+                                // data is a javascript object/array/null matching that shipped Instagram
+                                // when available (mostly /recent), pagination is a javascript object with the pagination information
+                                },
+                                error: function(errorMessage, errorObject, caller){
+                                // errorMessage is the raised error message
+                                // errorObject is either the object that caused the issue, or the nearest neighbor
+                                // caller is the method in which the error occurred
+                                console.log(errorMessage+" ----- "+errorObject+" ***** "+caller);
+                                console.log("Number venues null = "+ count4++);
+                                }});
+  }).on('error', function (err) {
+    // handle the error
+    console.log(err);
+  }).on('close', function () {
+    // the stream is closed
+  });
 });
 var Schema = mongoose.Schema;
 
@@ -126,30 +151,3 @@ function	saveVenues(venues){
 		}
 	});
 }
-
-var count4=0;
-var stream = Venue.find({},{"id":1}).limit(4800).skip(16800).stream();
-
-stream.on('data', function (doc) {
-  // do something with the mongoose document
-  console.log(doc.id);
-
-  Instagram.locations.search({foursquare_v2_id: doc.id,
-                              complete: function(data, pagination){
-                              readVenues(data[0],doc.id);
-                              // data is a javascript object/array/null matching that shipped Instagram
-                              // when available (mostly /recent), pagination is a javascript object with the pagination information
-                              },
-                              error: function(errorMessage, errorObject, caller){
-                              // errorMessage is the raised error message
-                              // errorObject is either the object that caused the issue, or the nearest neighbor
-                              // caller is the method in which the error occurred
-                              console.log(errorMessage+" ----- "+errorObject+" ***** "+caller);
-                              console.log("Number venues null = "+ count4++);
-                              }});
-}).on('error', function (err) {
-  // handle the error
-  console.log(err);
-}).on('close', function () {
-  // the stream is closed
-});

@@ -14,6 +14,34 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
   // yay!
+  var stream = MediaRecentIdMax.find({}).stream();
+  stream.on('data', function (doc) {
+    // do something with the mongoose document
+    if (doc.next_max_id !== null) {
+      console.log("aggiorno  "+doc.instagramId+" "+ doc.next_max_id);
+      Instagram.locations.recent2({location_id: doc.instagramId, max_id: doc.next_max_id,
+                                  complete: function(data, pagination){
+                                  console.log("Return pagination -->  "+doc.instagramId+" "+ pagination.next_max_id);
+                                  updateNextIdMaxVenues(doc.instagramId,pagination.next_max_id);
+                                  readVenues(data,doc.instagramId);
+                                  // data is a javascript object/array/null matching that shipped Instagram
+                                  // when available (mostly /recent), pagination is a javascript object with the pagination information
+                                  },
+                                  error: function(errorMessage, errorObject, caller){
+                                  // errorMessage is the raised error message
+                                  // errorObject is either the object that caused the issue, or the nearest neighbor
+                                  // caller is the method in which the error occurred
+                                  console.log(errorMessage+"--enzo-- "+"--enzo"+caller);
+                                  }});
+    }
+
+  }).on('error', function (err) {
+    // handle the error
+    console.log(err);
+  }).on('close', function () {
+    // the stream is closed
+    console.log("Finish!");
+  });
 });
 var Schema = mongoose.Schema;
 
@@ -226,32 +254,3 @@ function updateNextIdMaxVenues(id,max_id){
     }
 );
 }
-
-var stream = MediaRecentIdMax.find({}).stream();
-stream.on('data', function (doc) {
-  // do something with the mongoose document
-  if (doc.next_max_id !== null) {
-    console.log("aggiorno  "+doc.instagramId+" "+ doc.next_max_id);
-    Instagram.locations.recent2({location_id: doc.instagramId, max_id: doc.next_max_id,
-                                complete: function(data, pagination){
-                                console.log("Return pagination -->  "+doc.instagramId+" "+ pagination.next_max_id);
-                                updateNextIdMaxVenues(doc.instagramId,pagination.next_max_id);
-                                readVenues(data,doc.instagramId);
-                                // data is a javascript object/array/null matching that shipped Instagram
-                                // when available (mostly /recent), pagination is a javascript object with the pagination information
-                                },
-                                error: function(errorMessage, errorObject, caller){
-                                // errorMessage is the raised error message
-                                // errorObject is either the object that caused the issue, or the nearest neighbor
-                                // caller is the method in which the error occurred
-                                console.log(errorMessage+"--enzo-- "+"--enzo"+caller);
-                                }});
-  }
-
-}).on('error', function (err) {
-  // handle the error
-  console.log(err);
-}).on('close', function () {
-  // the stream is closed
-  console.log("Finish!");
-});

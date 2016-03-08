@@ -13,6 +13,36 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
   // yay!
+  var stream = InstagramId.find({},{"id":1}).limit(1).stream();
+  stream.on('data', function (doc) {
+    // do something with the mongoose document
+    console.log(doc.id );
+    Instagram.locations.recent({location_id: doc.id,
+                                complete: function(data, pagination){
+                                idMaxVenue = {
+                                                "instagramId":doc.id,
+                                                "next_max_id":pagination.next_max_id
+                                };
+                                if(typeof pagination.next_max_id !== "undefined"){
+                                  saveVenues(new MediaRecentIdMax(idMaxVenue));
+                                  updateNextIdMaxVenues(doc.id,pagination.next_max_id);
+                                }
+                                readVenues(data,doc.id);
+                                // data is a javascript object/array/null matching that shipped Instagram
+                                // when available (mostly /recent), pagination is a javascript object with the pagination information
+                                },
+                                error: function(errorMessage, errorObject, caller){
+                                // errorMessage is the raised error message
+                                // errorObject is either the object that caused the issue, or the nearest neighbor
+                                // caller is the method in which the error occurred
+                                console.log(errorMessage+"--enzo-- "+errorObject+"--enzo"+caller);
+                                }});
+  }).on('error', function (err) {
+    // handle the error
+    console.log(err);
+  }).on('close', function () {
+    // the stream is closed
+  });
 });
 var Schema = mongoose.Schema;
 
@@ -238,34 +268,3 @@ function updateNextIdMaxVenues(id,max_id){
     }
 );
 }
-
-var stream = InstagramId.find({},{"id":1}).limit(1).stream();
-stream.on('data', function (doc) {
-  // do something with the mongoose document
-  console.log(doc.id );
-  Instagram.locations.recent({location_id: doc.id,
-                              complete: function(data, pagination){
-                              idMaxVenue = {
-                                              "instagramId":doc.id,
-                                              "next_max_id":pagination.next_max_id
-                              };
-                              if(typeof pagination.next_max_id !== "undefined"){
-                                saveVenues(new MediaRecentIdMax(idMaxVenue));
-                                updateNextIdMaxVenues(doc.id,pagination.next_max_id);
-                              }
-                              readVenues(data,doc.id);
-                              // data is a javascript object/array/null matching that shipped Instagram
-                              // when available (mostly /recent), pagination is a javascript object with the pagination information
-                              },
-                              error: function(errorMessage, errorObject, caller){
-                              // errorMessage is the raised error message
-                              // errorObject is either the object that caused the issue, or the nearest neighbor
-                              // caller is the method in which the error occurred
-                              console.log(errorMessage+"--enzo-- "+errorObject+"--enzo"+caller);
-                              }});
-}).on('error', function (err) {
-  // handle the error
-  console.log(err);
-}).on('close', function () {
-  // the stream is closed
-});

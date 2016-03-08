@@ -105,21 +105,6 @@ venueSchema.plugin(uniqueValidator);
 var Venue = mongoose.model('Venue', venueSchema);
 
 
-function queryExec(venues,qry){
-	var queries = [];
-	var query = Venue.findOne({ 'id': venues.id });
-
-	query.exec((function(venues) {return function (err, responseQuery) {
-			if (err) console.log(err+"query exec problem");// return handleError(err); }
-					if (responseQuery === null) {
-						venues.save(function (err) {
-							if (err) {console.log(err+"new venue not save!");}//; return handleError(err);}
-						});
-					}
-	};
-	})(venues));
-}
-
 var count=0;
 function readVenues(venuesJSON){
 		for (var i = 0 ; i < venuesJSON.length; i++) {
