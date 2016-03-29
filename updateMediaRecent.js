@@ -40,66 +40,9 @@ db.once('open', function (callback) {
     console.log(err);
   }).on('close', function () {
     // the stream is closed
-    console.log("Finish!");
   });
 });
 var Schema = mongoose.Schema;
-
-var venueSchema = new Schema({
-             id:  { type: String, required: true, unique: true },
-             name: String,
-						 contact:     [{
- 														 twitter: String,
- 														 facebook: Number,
- 														 facebookUsername: String,
- 														 facebookName: String
- 												 }],
-						 location:   [{
-						 								lat: Number,
-						 								lng: Number,
-						 								distance: Number,
-						 								postalCode: String,
-						 								cc: String,
-						 								city: String,
-						 								state: String,
-						 								country: String,
-						 								formattedAddress: []
-						 						 }],
-						categories:  [{
-														id: String,
-														name: String,
-														pluralName: String,
-														shortName: String,
-														icon:     [{
-																					 prefix: String,
-																					 suffix: String
-																		 	}],
-													  primary : Boolean
-												 }],
-					 verified: Boolean,
-		  		 stats:        [{
-														checkinsCount: Number,
-							 						  usersCount: Number,
-							 						  tipCount: Number
-												 }],
-					 url: String,
-					 specials:    [{
-														count: Number,
-														items: []
-												}],
-					 hereNow:     [{
-														count: Number,
-														summary: String,
-														groups:			[{
-																					//type: String,
-																					name: String,
-																					count: Number,
-																					items: []
-																			 }]
-												}],
-					referralId: String,
-					venueChains: []
-	});
 
 var mediaRecentVenueSchema = new Schema({
   data: [{
@@ -195,8 +138,6 @@ var mediaRecentIdMaxShema = new Schema({
 });
 
 // Apply the uniqueValidator plugin to userSchema.
-venueSchema.plugin(uniqueValidator);
-var Venue = mongoose.model('Venue', venueSchema);
 
 instagramIdSchema.plugin(uniqueValidator);
 var InstagramId = mongoose.model('instagram_venues', instagramIdSchema);

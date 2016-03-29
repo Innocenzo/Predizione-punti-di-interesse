@@ -1,11 +1,6 @@
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
-var foursquare = (require('foursquarevenues'))('CLIENTIDKEY', 'CLIENTSECRETKEY');
-	var params = {
-		"ll": "41.9027835,12.496365500000024",
-    "radius": '5000'
-	};
-
+var foursquare = (require('foursquarevenues'))('WUU3GJDZ4JS2CU04VGSRLGSQQJU5GK4XYFDUUHZ0HIVVG1BS', 'KLNEANMQTI0ZJILE2YJ4JQTE3YE0ZN0XJCEV3PYCISCYL1EW');
 
 /**
  * access to mongodb
@@ -22,12 +17,12 @@ db.once('open', function (callback) {
 	//------------------- south east   41.789  12.325
 
 	var contatore=0;
-	for (var i = 12.3253298; i < 12.419; i+=0.001) {
-		for (var j = 41.8972702; j < 41.907; j+=0.001) {
+	for (var i = 12.325; i < 12.425; i+=0.01) {
+		for (var j = 41.889; j < 41.939; j+=0.01) {
 			console.log("<--- request --->"+i+"   "+j);
 			var params = {
 				"ll": j+","+i,
-		    "radius": '5000'
+		    "radius": '500'
 			};
 			foursquare.getVenues(params, function(error, venues) {
 						if (venues !== null) {

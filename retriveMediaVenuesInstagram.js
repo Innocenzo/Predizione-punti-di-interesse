@@ -13,7 +13,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
   // yay!
-  var stream = InstagramId.find({},{"id":1}).limit(1).stream();
+  var stream = InstagramId.find({},{"id":1}).stream();
   stream.on('data', function (doc) {
     // do something with the mongoose document
     console.log(doc.id );
@@ -35,7 +35,7 @@ db.once('open', function (callback) {
                                 // errorMessage is the raised error message
                                 // errorObject is either the object that caused the issue, or the nearest neighbor
                                 // caller is the method in which the error occurred
-                                console.log(errorMessage+"--enzo-- "+errorObject+"--enzo"+caller);
+                                console.log(errorMessage+"------- "+errorObject+"------"+caller);
                                 }});
   }).on('error', function (err) {
     // handle the error
@@ -45,66 +45,6 @@ db.once('open', function (callback) {
   });
 });
 var Schema = mongoose.Schema;
-
-/**
- * structure venues in mongodb
- */
-var venueSchema = new Schema({
-             id:  { type: String, required: true, unique: true },
-             name: String,
-						 contact:     [{
- 														 twitter: String,
- 														 facebook: Number,
- 														 facebookUsername: String,
- 														 facebookName: String
- 												 }],
-						 location:   [{
-						 								lat: Number,
-						 								lng: Number,
-						 								distance: Number,
-						 								postalCode: String,
-						 								cc: String,
-						 								city: String,
-						 								state: String,
-						 								country: String,
-						 								formattedAddress: []
-						 						 }],
-						categories:  [{
-														id: String,
-														name: String,
-														pluralName: String,
-														shortName: String,
-														icon:     [{
-																					 prefix: String,
-																					 suffix: String
-																		 	}],
-													  primary : Boolean
-												 }],
-					 verified: Boolean,
-		  		 stats:        [{
-														checkinsCount: Number,
-							 						  usersCount: Number,
-							 						  tipCount: Number
-												 }],
-					 url: String,
-					 specials:    [{
-														count: Number,
-														items: []
-												}], //items salva un array []
-					 hereNow:     [{
-														count: Number,
-														summary: String,
-														groups:			[{
-																					//type: String,
-																					name: String,
-																					count: Number,
-																					items: []
-																			 }]  //items salva un array []
-												}],
-					referralId: String,
-					venueChains: []
-				 			//venueChains salva un array []
-	});
 
 /**
  * structure mediaRecentVenue in mongodb
@@ -209,9 +149,6 @@ var mediaRecentIdMaxShema = new Schema({
 });
 
 // Apply the uniqueValidator plugin to userSchema.
-venueSchema.plugin(uniqueValidator);
-var Venue = mongoose.model('Venue', venueSchema);
-
 instagramIdSchema.plugin(uniqueValidator);
 var InstagramId = mongoose.model('instagram_venues', instagramIdSchema);
 

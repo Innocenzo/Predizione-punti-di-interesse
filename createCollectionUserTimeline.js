@@ -15,7 +15,7 @@ db.once('open', function (callback) {
     idTimeline = {
                     "id":doc.data[0].user[0].id
     };
-    saveVenues(new UserTimeline(idTimeline));
+    saveTimeline(new UserTimeline(idTimeline));
 
 
   }).on('error', function (err) {
@@ -125,7 +125,7 @@ var UserTimeline = mongoose.model('userTimeline', userTimelineSchema);
 
 var count2=0;
 var count3=0;
-function	saveVenues(user){
+function	saveTimeline(user){
 	user.save(function (err) {
 		if (err) {
       console.log(err);

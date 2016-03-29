@@ -1,11 +1,10 @@
 var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
-var parsedJSON = require('/home/enzo/Documenti/SII/simpleIS/instagramId.json');
 
-Instagram.set('client_id', 'client_id');
-Instagram.set('client_secret', 'client_secret');
-Instagram.set('access_token', 'access_token');
+Instagram.set('client_id', 'b59fbe4563944b6c88cced13495c0f49');
+Instagram.set('client_secret', '27699dbee9d14d2394fc17f1e8606cdb');
+Instagram.set('access_token', '2333976090.44e6baf.97354e48b41f4072b7f6e648c6059584');
 
 mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
@@ -13,7 +12,7 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
   // yay!
-  var stream = Venue.find({},{"id":1}).limit(4800).skip(16800).stream();
+  var stream = Venue.find({},{"id":1}).limit(5000).skip(0).stream();
 
   stream.on('data', function (doc) {
     // do something with the mongoose document
@@ -138,6 +137,7 @@ function readVenues(venuesJSON,foursquare_id){
 
 var count2=0;
 var count3=0;
+var count4=0;
 function	saveVenues(venues){
 	venues.save(function (err) {
 		if (err) {
