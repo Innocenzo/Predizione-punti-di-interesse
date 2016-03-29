@@ -10,7 +10,7 @@ db.once('open', function (callback) {
 // CREAZIONE SCHEMA
 var Schema = mongoose.Schema;
 
-var instagramIdSchema2 = new Schema({
+var instagramIdSchema = new Schema({
              id:  { type: String, required: true, unique: true },
              foursquare_v2_id: { type: String, required: true, unique: true },
              category_place: String,
@@ -43,8 +43,8 @@ var userIdSchema = new Schema({
 
 weightlistSchema.plugin(uniqueValidator);
 var weightList = mongoose.model('weightList', weightlistSchema);
-instagramIdSchema2.plugin(uniqueValidator);
-var instagramId2 = mongoose.model('instagram_venues_macrocategory', instagramIdSchema2);
+instagramIdSchema.plugin(uniqueValidator);
+var instagramId = mongoose.model('instagram_venues_macrocategory', instagramIdSchema2);
 macrocategorySchema.plugin(uniqueValidator);
 var macrocategory = mongoose.model('macrocategory', macrocategorySchema);
 var UserId = mongoose.model('users_venues', userIdSchema);
@@ -71,8 +71,6 @@ stream.on('data',function(doc) {
 
 function SetMacrocategory(instance){
 
-//      console.log('SetMacrocategory: '+instance);
-
     //INSERISCO LE MACROCATEGORIE
       var Weights = new weightList();
       Weights.user_id = instance.user_id;
@@ -80,7 +78,6 @@ function SetMacrocategory(instance){
       var stream = macrocategory.find().stream();
       stream.on('data', function(doc) {
 
-        //console.log(doc.macrocategory);
           Weights.macrocategory.push(doc.macrocategory);
           Weights.weight.push(0);
 
@@ -101,8 +98,6 @@ function SetMacrocategory(instance){
             }
         })
        // the stream is closed
-       //  console.log("SetMacrocategory Finish!");
-
       });
 
 }
@@ -117,7 +112,7 @@ function SetWeight(instance,Weights){
           var venue = instance.venues[j]
 
       //INSERISCO I PESI
-      var stream = instagramId2.find({id: venue}).limit().stream();
+      var stream = instagramId.find({id: venue}).limit().stream();
       stream.on('data', function(doc) {
 
                 for(i=0; i<Weights.weight.length;i++){
@@ -135,7 +130,6 @@ function SetWeight(instance,Weights){
         console.log(err);
       }).on('close', function () {
        // the stream is closed
-      //  console.log("SetWeight Finish!");
       });
 
     }
