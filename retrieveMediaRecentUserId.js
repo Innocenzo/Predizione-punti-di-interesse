@@ -142,11 +142,11 @@ var mediaRecentVenueSchema = new Schema({
        if (err) {
          count2++;
          console.log('duplicate '+count2);
-         //  return console.error("user duplicate not save: "+err);
+       
        }else{
          count3++
          console.log('save '+count3);
-     //return console.log("user new save");
+    
        }
 
      });
@@ -157,7 +157,6 @@ var mediaRecentVenueSchema = new Schema({
     console.log(err);
   }).on('close', function () {
    // the stream is closed
-   //    stream.destroy()
    ReadUsers();
    console.log("Finish!");
   });
@@ -168,7 +167,6 @@ var mediaRecentVenueSchema = new Schema({
       var stream = UserX.find().stream()
       stream.on('data',function(doc){
 
-        //console.log(doc.id);
         var User = new UserId();
         User.user_id=doc.id;
         ReadVenues(User);
@@ -179,11 +177,9 @@ var mediaRecentVenueSchema = new Schema({
                if (err) {
                  count4++;
                  console.log('duplicate '+count2);
-                 //  return console.error("user duplicate not save: "+err);
                }else{
                  count5++
                  console.log('save '+count3);
-             //return console.log("user new save");
                }
 
              });
@@ -195,7 +191,6 @@ var mediaRecentVenueSchema = new Schema({
         console.log(err);
       }).on('close', function () {
        // the stream is closed
-       //    stream.destroy()
        console.log("Finish!");
       });
 
@@ -204,7 +199,6 @@ var mediaRecentVenueSchema = new Schema({
 
    function ReadVenues(UserId){
 
-     //console.log("Cerca venues di user: "+UserId.user_id+" diverso da: "+UserId.venues)
      var stream = MediaRecentVenue.find({'data.user.id':UserId.user_id}).where('data.instagramId').ne([UserId.instagramId]).stream()
      stream.on('data',function(doc){
 
@@ -217,7 +211,6 @@ var mediaRecentVenueSchema = new Schema({
        console.log(err);
      }).on('close', function () {
       // the stream is closed
-      //    stream.destroy()
       console.log("ReadVenues Finish!");
      });
 
