@@ -25,12 +25,6 @@ console.log('connection successful!');
                          stream2.on('data', function (doc2) {
                            console.log(doc2.id+"   "+doc2.latitude+"   "+doc2.longitude +"   "+doc2.name);
                             updateResult(i,doc2.id,doc2.latitude,doc2.longitude,doc2.name);
-                          //  for (var i = 0; i < category.length; i++) {
-                          //    if (category[i][doc2.category_place]) {
-                          //      console.log(doc2.id+"   "+categorie[i]+"   "+doc.id+"   "+i);
-                          //      updateResult(doc.id,i);
-                          //      }
-                          //  }
 
                       }).on('error', function (err) {
 

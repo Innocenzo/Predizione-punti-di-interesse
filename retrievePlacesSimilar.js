@@ -4,12 +4,14 @@ var util = require('util');
 var mongoose = require('mongoose');
 var kmeans = require('node-kmeans');
 //connect mongodb
-mongoose.connect('mongodb://localhost/Dataset');
+mongoose.connect('mongodb://localhost/DataSet');
 var uniqueValidator = require('mongoose-unique-validator');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
+  mongoose.connection.db.dropCollection('raccomendedcategory', function(err, result) {console.log(err+"  "+result);});
+
 });
 
 //schema creation
@@ -131,13 +133,13 @@ var control=0;
 var altro=[];
 
 //read a file of places that must be visit
-var file = '/home/marco/DaVisitare.json';
+var file = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/DaVisitare.json';
 jsonfile.readFile(file, function(err, obj) {
     console.log(obj);
   place1.push(obj.id_instagram);
 
   //read a file of places that the user has visited
-  var file2 = '/home/marco/Visitati.json';
+  var file2 = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/Visitati.json';
   jsonfile.readFile(file2, function(err, obj) {
     place2.push(obj.id_instagram);
     //save the user that must be raccomended
