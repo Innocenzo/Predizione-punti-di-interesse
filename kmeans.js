@@ -5,7 +5,7 @@ var kmeans = require('node-kmeans');
 var jsonfile = require('jsonfile');
 var async = require('async');
 //connect mongodb
-mongoose.connect('mongodb://localhost/Dataset');
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -119,7 +119,7 @@ function calculate_kmeans(data) {
       return parseFloat(b.similarity) - parseFloat(a.similarity);
     })
 console.log(Similitude);
-for (var i = 0; i < 10; i++) {
+for (var i = 0; i < 5; i++) {
   a.push(Similitude[i]);
 }
 
@@ -150,7 +150,7 @@ for (var i = 0; i < 10; i++) {
 
       }).on('close', function () {
 
-       var file = '/home/marco/DaVisitare.json';
+       var file = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/DaVisitare.json';
        var obj = {id_instagram:vettore};
        jsonfile.writeFile(file, obj, function (err) {
 
@@ -171,7 +171,7 @@ for (var i = 0; i < 10; i++) {
 
     }).on('close', function () {
 
-     var file = '/home/marco/Visitati.json';
+     var file = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/Visitati.json';
      var obj = {id_instagram:VisitedPlaces,
                   user: company};
      jsonfile.writeFile(file, obj, function (err) {
@@ -186,7 +186,7 @@ for (var i = 0; i < 10; i++) {
 
 
 //user to match
-var company='53697444';
+var company='177845957';
 //global variables
 var WeightedList = [];
 var VectorZero=[0,0,0,0,0,0,0,0];

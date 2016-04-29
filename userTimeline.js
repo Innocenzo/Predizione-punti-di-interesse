@@ -2,30 +2,35 @@ var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
 
-
+count5=0;
+count6=0;
 mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
 
   console.log('connection successful!');
-            var stream2 = MediaRecentVenue.find({}).stream();
-            stream2.on('data', function (doc2) {
 
-              console.log(doc2.data[0].user[0].id+"   "+doc2.instagramId);
-              updateNextIdMaxVenues(doc2.data[0].user[0].id,doc2.instagramId);
-
-            }).on('error', function (err) {
-              // handle the error
-              console.log(err);
-            }).on('close', function () {
-              // the stream is closed
-              // console.log("end steam 2!");
-            });
+      MediaRecentVenue.count({}, function( err, count){
+              console.log( "Number of users:", count );
+                var stream2 = MediaRecentVenue.find({}).limit(count).stream();
+                stream2.on('data', function (doc2) {
+                  console.log(doc2.data[0].user[0].id+"   "+doc2.instagramId);
+                  // console.log(count6++);
+                  updateNextIdMaxVenues(doc2.data[0].user[0].id,doc2.instagramId);
+                  // do something with the mongoose document
+                }).on('error', function (err) {
+                  // handle the error
+                  console.log(err);
+                }).on('close', function () {
+                  // the stream is closed
+                  // console.log("end steam 2!");
+                  //mongoose.connection.close();
+                });
+      });
 });
-
-
 var Schema = mongoose.Schema;
+
 
 var mediaRecentVenueSchema = new Schema({
   //dati da Instagram
@@ -109,13 +114,16 @@ var mediaRecentVenueSchema = new Schema({
 
 	});
 
+
+
 var userTimelineSchema = new Schema({
           id:  { type: String, required: true, unique: true },
-          venues: [{}]
+          venues: [{}],
+          listMacro: []
 });
-
-
 // Apply the uniqueValidator plugin to userSchema.
+
+
 mediaRecentVenueSchema.plugin(uniqueValidator);
 var MediaRecentVenue = mongoose.model('mediaRecentVenues', mediaRecentVenueSchema);
 
@@ -123,9 +131,9 @@ var MediaRecentVenue = mongoose.model('mediaRecentVenues', mediaRecentVenueSchem
 userTimelineSchema.plugin(uniqueValidator);
 var UserTimeline = mongoose.model('userTimeline', userTimelineSchema);
 
-
 var count2=0;
 var count3=0;
+
 function updateNextIdMaxVenues(idx,venues){
   UserTimeline.findOneAndUpdate(
     { id: idx },

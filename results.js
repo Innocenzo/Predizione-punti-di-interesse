@@ -74,7 +74,7 @@ function updateResult(i,id,latitude,longitude,name){
             raccomendedcategory.findOneAndUpdate(
               {"list_raccomended.place": id } ,
               { "list_raccomended.$.name": name,"list_raccomended.$.latitude": latitude,"list_raccomended.$.longitude": longitude},
-              { runValidators: true, context: 'query' },
+              { runValidators: true, context: 'query' ,upsert:true,new:true,multi: true},
               function(err) {
                 if (err) {
                   console.log(err);
@@ -82,7 +82,7 @@ function updateResult(i,id,latitude,longitude,name){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
+                  console.log("new venue update --------------->   "+id);
                   console.log("Number venues update = "+count3);
                 }
               }

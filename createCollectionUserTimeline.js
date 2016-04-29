@@ -2,8 +2,8 @@ var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
 
-
-mongoose.connect('mongodb://localhost/venues');
+// crea UserTimeline con solo id utente
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -128,7 +128,6 @@ var count3=0;
 function	saveTimeline(user){
 	user.save(function (err) {
 		if (err) {
-      console.log(err);
 			count2++;
 			console.log("media duplicate = "+ count2);
 		}else{
