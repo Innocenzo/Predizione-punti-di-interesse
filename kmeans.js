@@ -3,8 +3,9 @@ var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
 var kmeans = require('node-kmeans');
 var jsonfile = require('jsonfile');
+var async = require('async');
 //connect mongodb
-mongoose.connect('mongodb://localhost/DataSet');
+mongoose.connect('mongodb://localhost/Dataset');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -82,11 +83,14 @@ function calculate_kmeans(data) {
     }
 
     var SimilarPlaces=[];
+    var SimilarPlaces2=[];
     var VisitedPlaces=[];
     var Position=0;
     var NumberCluster=0;
     var ClusterListId=[];
     var Similitude=[];
+    var vettore=[];
+    var a=[];
 
     //find the number of the cluster in witch "company" is
     for (var i = 0; i < IdCluster.length; i++) {
@@ -109,38 +113,52 @@ function calculate_kmeans(data) {
         Similitude.push({"user":ClusterListId[i],"similarity": similarity(MacroCluster[NumberCluster][Position],MacroCluster[NumberCluster][i])} )
       }
     }
-    console.log(Similitude);
+
 
     Similitude.sort(function(a, b) {
       return parseFloat(b.similarity) - parseFloat(a.similarity);
     })
+console.log(Similitude);
+for (var i = 0; i < 10; i++) {
+  a.push(Similitude[i]);
+}
 
     //find the three users more similar and return two json: one with the places that "company" has visited
-    //the other with the places in witch his more similar users have visited
-    for (var i = 0; i < 10; i++) {
-      SimilarUser.push(Similitude[i].user);
-      var stream = usertimeline.find({"id":Similitude[i].user}).stream()
-      stream.on('data',function(doc2) {
-        for (var i = 0; i < doc2.venues.length; i++) {
-          SimilarPlaces.push(doc2.venues[i]);
-        }
 
+    //the other with the places in witch his more similar users have visited
+    async.each(a, function(pro) {
+      console.log(pro.user);
+
+      var stream = usertimeline.find({"id":pro.user}).stream()
+      stream.on('data',function(doc2) {
+        console.log(pro);
+
+        for (var i = 0; i < doc2.venues.length; i++) {
+        SimilarPlaces2.push(doc2.venues[i]);
+        }
+        var newdata={
+          'venues':SimilarPlaces2,
+          'user':doc2.id,
+          'similarity':pro.similarity
+
+        }
+        vettore.push(newdata);
+        SimilarPlaces2=[];
       }).on('error', function (err) {
 
         console.log(err);
 
       }).on('close', function () {
 
-       var file = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/DaVisitare.json';
-       var obj = {id_instagram:SimilarPlaces,
-                  similaruser:SimilarUser};
+       var file = '/home/marco/DaVisitare.json';
+       var obj = {id_instagram:vettore};
        jsonfile.writeFile(file, obj, function (err) {
 
          console.error(err);
 
       })
       });
-    }
+    })
 
     var stream = usertimeline.find({"id":company}).stream()
     stream.on('data',function(doc2) {
@@ -153,7 +171,7 @@ function calculate_kmeans(data) {
 
     }).on('close', function () {
 
-     var file = '/home/enzo/Documenti/SII/predizione -punti-di-interesse.git/Visitati.json';
+     var file = '/home/marco/Visitati.json';
      var obj = {id_instagram:VisitedPlaces,
                   user: company};
      jsonfile.writeFile(file, obj, function (err) {
