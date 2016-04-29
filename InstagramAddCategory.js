@@ -6,7 +6,7 @@ var uniqueValidator = require('mongoose-unique-validator');
 
 //connect mongodb
 
-mongoose.connect('mongodb://localhost/Dataset');
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
