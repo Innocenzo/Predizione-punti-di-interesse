@@ -1,30 +1,43 @@
 var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
-
+var countClose=0;
 // crea UserTimeline con solo id utente
 mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
   console.log('connection successful!');
-  var stream = MediaRecentVenue.find({}).stream();
-  stream.on('data', function (doc) {
-    // do something with the mongoose document
-    //console.log(doc.data[0].user[0].id+"   "+doc.instagramId);
-    idTimeline = {
-                    "id":doc.data[0].user[0].id
-    };
-    saveTimeline(new UserTimeline(idTimeline));
+
+  MediaRecentVenue.count({}, function( err, count){
+          console.log( "Number of media:", count );
+          var stream = MediaRecentVenue.find({}).limit(count).stream();
+          stream.on('data', function (doc) {
+            countClose++;
+            // do something with the mongoose document
+            //console.log(doc.data[0].user[0].id+"   "+doc.instagramId);
+            idTimeline = {
+                            "id":doc.data[0].user[0].id
+            };
+            saveTimeline(new UserTimeline(idTimeline));
 
 
-  }).on('error', function (err) {
-    // handle the error
-    console.log(err);
-  }).on('close', function () {
-    // the stream is closed
-    //mongoose.connection.close();
-  });
+          }).on('error', function (err) {
+            // handle the error
+            console.log(err);
+          }).on('close', function () {
+            // the stream is closed
+
+            if (count==countClose) {
+              setTimeout(function () {
+                  console.log("users created: "+countClose);
+                  mongoose.connection.close();
+              }, 2000);
+
+            }
+
+          });
+    });
 });
 var Schema = mongoose.Schema;
 
@@ -129,11 +142,11 @@ function	saveTimeline(user){
 	user.save(function (err) {
 		if (err) {
 			count2++;
-			console.log("media duplicate = "+ count2);
+			console.log("Users duplicate = "+ count2);
 		}else{
 			count3++;
 			//console.log("new media saved --------------->   "+user);
-			console.log("Number media save = "+count3);
+			console.log("Number users save = "+count3);
 		}
 	});
 }

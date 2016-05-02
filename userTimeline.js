@@ -4,6 +4,7 @@ var uniqueValidator = require('mongoose-unique-validator');
 
 count5=0;
 count6=0;
+countClose=0;
 mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
@@ -12,11 +13,11 @@ db.once('open', function (callback) {
   console.log('connection successful!');
 
       MediaRecentVenue.count({}, function( err, count){
-              console.log( "Number of users:", count );
+              console.log( "Number of media:", count );
                 var stream2 = MediaRecentVenue.find({}).limit(count).stream();
                 stream2.on('data', function (doc2) {
-                  console.log(doc2.data[0].user[0].id+"   "+doc2.instagramId);
-                  // console.log(count6++);
+                  countClose++;
+                  // console.log(doc2.data[0].user[0].id+"   "+doc2.instagramId);
                   updateNextIdMaxVenues(doc2.data[0].user[0].id,doc2.instagramId);
                   // do something with the mongoose document
                 }).on('error', function (err) {
@@ -24,8 +25,13 @@ db.once('open', function (callback) {
                   console.log(err);
                 }).on('close', function () {
                   // the stream is closed
-                  // console.log("end steam 2!");
-                  //mongoose.connection.close();
+                  if (count==countClose) {
+                    setTimeout(function () {
+                        console.log("Number venues added: "+countClose);
+                        mongoose.connection.close();
+                    }, 3000);
+
+                  }
                 });
       });
 });

@@ -2,6 +2,7 @@ var Instagram = require('instagram-node-lib');
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
 var count6=0;
+var countClose=0;
 mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
@@ -15,17 +16,22 @@ db.once('open', function (callback) {
     var stream = UserTimeline.find({}).limit(count).stream();
     stream.on('data', function (doc) {
       // do something with the mongoose document
-
-                console.log(count6++);
-                updateField(doc.id);
+      countClose++;
+      updateField(doc.id);
 
     }).on('error', function (err) {
       // handle the error
       console.log(err);
     }).on('close', function () {
       // the stream is closed
-      // console.log("Finish!");
-      //mongoose.connection.close();
+      if (count==countClose) {
+        setTimeout(function () {
+            console.log("users updated: "+countClose);
+            mongoose.connection.close();
+        }, 4000);
+
+      }
+      console.log("enzo"+count);
     });
 });
 
@@ -64,8 +70,7 @@ function updateField(idx){
   			console.log("error = "+ count2);
   		}else{
   			count3++;
-  			console.log("new user update --------------->   "+idx+"   instagram_Venue= ");
-  			console.log("Number venues added = "+count3);
+  			console.log("Number users updated = "+count3);
   		}
     }
 );

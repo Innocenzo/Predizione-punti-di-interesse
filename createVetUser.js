@@ -1,6 +1,7 @@
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
 
+var countClose=0;
 //connect mongodb
 
 mongoose.connect('mongodb://localhost/DataSet');
@@ -9,16 +10,13 @@ db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
 console.log('connection successful!');
 
-    var stream = UserTimeline.find({}).stream();
+UserTimeline.count({}, function( err, count){
+        console.log( "Number of users:", count );
+    var stream = UserTimeline.find({}).limit(count).stream();
     stream.on('data', function (doc) {
-            // updateTimeline("1264085157",1);
-            //  console.log(doc);
-            // console.log(doc);
-            console.log("max"+doc.venues.length);
+        countClose++;
+            // console.log("max"+doc.venues.length);
             for (var i = 0; i < doc.venues.length; i++) {
-                  // console.log(doc.venues[i]);
-                        //cerca id in instagramId2
-
                          var stream2 = instagramId2.find({id: doc.venues[i]}).stream();
                          stream2.on('data', function (doc2) {
                            for (var i = 0; i < category.length; i++) {
@@ -38,7 +36,16 @@ console.log('connection successful!');
       }).on('error', function (err) {
 
       }).on('close', function () {
+        // the stream is closed
+        if (count==countClose) {
+          setTimeout(function () {
+              console.log("Number users analized : "+countClose +" into macrocategory");
+              mongoose.connection.close();
+          }, 6000);
+
+        }
       });//end stream
+    });//end count
 });
 
 
@@ -85,8 +92,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -103,8 +109,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -121,8 +126,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -140,8 +144,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -158,8 +161,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -176,8 +178,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
@@ -194,8 +195,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing  = "+count3);
                 }
               }
             );
@@ -212,8 +212,7 @@ function updateTimeline(id,i){
                   console.log("error = "+ count2);
                 }else{
                   count3++;
-                  console.log("new venue update --------------->   "+id+"   vet= "+i);
-                  console.log("Number venues update = "+count3);
+                  console.log("Number venues in macrocategory increasing = "+count3);
                 }
               }
             );
