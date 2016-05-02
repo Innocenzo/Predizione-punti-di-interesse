@@ -6,7 +6,7 @@ var uniqueValidator = require('mongoose-unique-validator');
 
 //connect mongodb
 
-mongoose.connect('mongodb://localhost/DataSet');
+mongoose.connect('mongodb://localhost/Dataset');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -81,7 +81,10 @@ var instagramIdSchema = new Schema({
 var instagramIdSchema2 = new Schema({
              id:  { type: String, required: true, unique: true },
              foursquare_v2_id: { type: String, required: true, unique: true },
-             category_place: String
+             category_place: String,
+             name: String,
+             latitude: String,
+             longitude:String
 
 	});
 
@@ -95,7 +98,7 @@ venueSchema.plugin(uniqueValidator);
 var venue = mongoose.model('venues', venueSchema);
 
 //functions
-function updateCategory(id_four,category){
+function updateCategory(id_four,category,lng,lat,name){
 //for every id add the field category_place
 var stream3 = instagramId.find({'foursquare_v2_id': id_four}).stream();
 stream3.on('data', function (doc3) {
@@ -103,7 +106,10 @@ stream3.on('data', function (doc3) {
   var newdata= {
                   'id' : doc3.id,
                   'foursquare_v2_id' : id_four,
-                  'category_place': category
+                  "name": name,
+                  'category_place': category,
+                  "latitude": lat,
+                  "longitude":lng
                 }
 
   saveVenues(new instagramId2(newdata));
@@ -142,7 +148,8 @@ var stream2 = venue.find({}).stream();
 stream2.on('data', function (doc2) {
   if (doc2.categories[0]!=undefined) {
     //call the function
-    updateCategory(doc2.id,doc2.categories[0].name);
+    updateCategory(doc2.id,doc2.categories[0].name, doc2.location[0].lng, doc2.location[0].lat,doc2.name);
+    console.log(doc2);
   }
 
 }).on('error', function (err) {
