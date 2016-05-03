@@ -23,5 +23,14 @@
                    "interessi culturali" : 0,
                    "divertimento" : 0,
                    "vita notturna" : 0,
-                   "caffè" : 0, 
+                   "caffè" : 0,
                    "ristoranti" : 5 } }
+{ "id" : "370295607", "venues" : [ "19779730", "19779730", "19779730", "19779730", "19779730" ],
+   "vetMacro" : { "monumento/punto di riferimento" : 0,
+                  "shopping" : 0,
+                  "Parchi" : 5,
+                  "interessi culturali" : 0,
+                  "divertimento" : 0,
+                  "vita notturna" : 0,
+                  "caffè" : 0,
+                  "ristoranti" : 0 } }
