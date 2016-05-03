@@ -66,12 +66,12 @@ function	saveVenues(venues){
 	venues.save(function (err) {
 		if (err) {
 			count2++;
-			console.log("venue duplicate = "+ count2);
+			console.log("category duplicate = "+ count2);
 		}
     else{
 			count3++;
 		//	console.log("new venue saved --------------->   "+venues);
-			console.log("Number venues save = "+count3);
+			console.log("Number categories save = "+count3);
 		}
 	});
   return;
