@@ -106,11 +106,7 @@ function calculate_kmeans(data) {
 
 }
 
-<<<<<<< Updated upstream
-=======
-//user to match
-var company='53734857';
->>>>>>> Stashed changes
+
 //global variables
 var WeightedList = [];
 var VectorZero=[0,0,0,0,0,0,0,0];
