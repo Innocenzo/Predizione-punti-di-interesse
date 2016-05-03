@@ -5,7 +5,7 @@ var kmeans = require('node-kmeans');
 var jsonfile = require('jsonfile');
 var async = require('async');
 //connect mongodb
-mongoose.connect('mongodb://localhost/DataSet');
+mongoose.connect('mongodb://localhost/Dataset');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -105,7 +105,6 @@ function calculate_kmeans(data) {
   })
 
 }
-
 
 //global variables
 var WeightedList = [];
