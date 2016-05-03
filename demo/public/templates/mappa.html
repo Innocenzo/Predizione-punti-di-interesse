@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Simple Map</title>
+    <meta name="viewport" content="initial-scale=1.0">
+    <meta charset="utf-8">
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        height: 300px;
+          width: 300px;
+      }
+      #results {
+        height: 300px;
+        width: 50%;
+        float:left;
+      }
+      #results2 {
+        height: 300px;
+        width: 50%;
+        float:right;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+    function initMap() {
+var myLatLng = [{lat: 41.873789569, lng: 12.529200621, name:"eeeee"},{lat: 41.877493811, lng: 12.47600019, name:"oooooo"}];
+// Create a map object and specify the DOM element for display.
+var map = new google.maps.Map(document.getElementById('map'), {
+  center: myLatLng[0],
+  scrollwheel: false,
+  zoom: 13
+});
+
+// Create a marker and set its position.
+for (var i = 0; i < myLatLng.length; i++) {
+  console.log(myLatLng[i].name);
+  var marker = new google.maps.Marker({
+    map: map,
+    position: myLatLng[i],
+    title: myLatLng[i].name
+  });
+}
+}
+    </script>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDLcFtk3aikOVRq4PG1GicGLvthov2KqRM&callback=initMap"
+    async defer></script>
+    <div id="results">
+      <h1>Enzo Becco...</h1>
+    </div>
+    <div id="results2">
+      <h1>e gay</h1>
+    </div>
+
+  </body>
+</html>

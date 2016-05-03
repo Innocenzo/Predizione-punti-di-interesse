@@ -1,0 +1,96 @@
+<html lang="en" data-framework="angularjs" ng-app="demo">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<title>Point of interest • Demo</title>
+        <!--link rel="stylesheet" href="/lib/redactor/css/redactor.css" /-->
+		<link rel="stylesheet" href="/css/todo.base.css">
+		<link rel="stylesheet" href="/css/bootstrap.css" type="text/css">
+
+
+		<link rel="stylesheet" href="/css/font-awesome.css" type="text/css">
+
+		<link rel="stylesheet" href="/css/select2.css" type="text/css">
+		<link rel="stylesheet" href="/css/main.css" type="text/css">
+		<!--link rel="stylesheet" href="/css/redactor/redactor.css" type="text/css"-->
+		<link rel="stylesheet" href="/lib/datepicker/css/datepicker-inline.css" type="text/css">
+		<link rel="stylesheet" href="/lib/timepicker/css/bootstrap-timepicker-inline.css">
+
+        <style>
+			div[ng-cloak] { display: none; }
+		</style>
+
+		<script>
+		function initMap(coordinates) {
+			console.log(coordinates);
+			var myLatLng =[];
+			if (coordinates!="undefined") {
+				for (var coord in coordinates[0].list_raccomended) {
+					console.log(coordinates[0].list_raccomended[coord].latitude +"   longitude" + coordinates[0].list_raccomended[coord].longitude);
+					myLatLng.push({lat: coordinates[0].list_raccomended[coord].latitude,
+						 lng:coordinates[0].list_raccomended[coord].longitude,
+					 		name:coordinates[0].list_raccomended[coord].name})
+					}
+			}
+
+
+			// for (var i = 0; i < coordinates[0].list_raccomended.length i++) {
+			// 	console.log(coordinates[0].list_raccomended);
+			// }
+// var myLatLng = [{lat:41.8803419,lng:12.4533257, name:"eeeee"},{lat: 41.877493811, lng: 12.47600019, name:"oooooo"}];
+// Create a map object and specify the DOM element for display.
+var map = new google.maps.Map(document.getElementById('map'), {
+	center: {lat:41.8803419,lng:12.4533257},
+	scrollwheel: false,
+	zoom: 11
+});
+
+// Create a marker and set its position.
+for (var i = 0; i < myLatLng.length; i++) {
+	console.log(myLatLng[i].name);
+	var marker = new google.maps.Marker({
+		map: map,
+		position: myLatLng[i],
+		title: myLatLng[i].name
+	});
+}
+};
+
+		</script>
+		<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDLcFtk3aikOVRq4PG1GicGLvthov2KqRM&callback=initMap"async defer></script>
+	</head>
+	<body  style="margin:10px ">
+		<!-- navigation bar -->
+		<div id="nav-content" class="navbar navbar-fixed-top no-print" >
+			<div ng-include="'/templates/navbar.tpl'"></div>
+		</div>
+
+		<!-- Bootstrap Alert -->
+		<div id="alerts" class="container" ng-if="alerts.length>0"  ng-cloak>
+			<alert ng-repeat="alert in alerts" type="alert.type" close="removeAlert($index)" >
+					{{alert.msg}} <span ng-if="alert.count > 1">({{ alert.count }} more like this)</span>
+			</alert>
+		</div>
+
+		<!-- Main body -->
+		<ng-view></ng-view>
+
+		<!-- External dependencies -->
+        <script src="/lib/jquery-1.10.2.min.js"></script>
+        <script src="/lib/redactor/redactor.js"></script>
+		<script src="/lib/angular.js"></script>
+		<script src="/lib/angular-route.js"></script>
+		<script src="/lib/ui-bootstrap-tpls-0.6.0.js"></script>
+        <script src="/lib/angular-redactor.js"></script>
+		<script src="/lib/select2.js"></script>
+		<script src="/lib/select2-angular.js"></script>
+		<script src="/lib/bootstrap/bootstrap-datepicker-inline.js"></script>
+		<script src="/lib/bootstrap/bootstrap-timepicker-inline.js"></script>
+
+		<!-- Angoose client -->
+		<script src="/angoose/angoose-client.js"></script>
+		<!-- main app -->
+		<script src="/demo-app.js"></script>
+		<script src="/controllers/todo.js"></script>
+		<script src="/controllers/userTimeline.js"></script>
+		<script src="/controllers/result.js"></script>

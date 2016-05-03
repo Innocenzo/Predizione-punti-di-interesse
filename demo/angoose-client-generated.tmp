@@ -1,0 +1,5360 @@
+/** Angoose Client Core */
+/**  depdnencies: http, Q */
+var AngooseClient = function(name) {
+    return AngooseClient.getClass(name)
+};
+(function BootstrapAngoose(){
+       
+    var logger = getLogger();
+    logger.setLevel( config('logging') || 'INFO');
+    
+    AngooseClient.getClass = getClass;
+    AngooseClient.model = getClass;
+    AngooseClient.modelNames = modelNames;
+    AngooseClient.init = init;
+    AngooseClient.module = getClass;
+    AngooseClient.config = config;
+    AngooseClient.logger = logger;  
+    
+    if (typeof(angoose) == 'undefined'){
+        angoose = AngooseClient;
+    } 
+    
+    logger.info("Bootstraping angoose-client");
+    
+    function getLogger(){
+        var levels = {
+            TRACE: { v: 1, name: "TRACE" },
+            DEBUG: { v: 2, name: "DEBUG" },
+            INFO: { v: 3, name: "INFO" },
+            WARN: { v: 4, name: "WARN" },
+            ERROR: { v: 5, name: "ERROR" },
+            LOG: { v: 6, name: "LOG" }
+        };
+    
+        var ClientLogger={
+            levels:levels,
+            level:levels.INFO
+        }
+        var methods = "log,info,trace,debug,warn,error".split(",");
+        for(var i=0; i < methods.length; i++){ 
+            var method = methods[i];
+            if(typeof(console)!='undefined' && console[method])
+                ClientLogger[method]= getLoggingFunc(method);
+            else
+                ClientLogger[method]=function(){}
+        };
+        function getLoggingFunc(method){
+            return function(){
+                if(ClientLogger.level.v <=  levels[method.toUpperCase()].v ){
+                    var args = []; args.push( method.toUpperCase() + ":");
+                    for(var i =0;i<arguments.length;i++) args.push(arguments[i]);
+                    if(method == 'trace') 
+                        console.debug.apply(console,args);
+                    else
+                        console[method].apply(console,args)
+                }
+            }
+        }
+        ClientLogger.setLevel=function(level){
+            if(!level) return; 
+            level = level.toUpperCase();
+            ClientLogger.level= levels[level] || levels.INFO;
+        }
+        return ClientLogger;
+    }
+    
+    
+    
+    
+    var counterBase = Math.round(Math.random() * 10000) * 10000;
+    var nextCounter = function() {
+        return counterBase++;
+    }
+    var encode$ = function(obj){
+        if(!obj || typeof obj != 'object') return obj;
+        if(obj && obj.length){
+            for(var i=0;i<obj.length;i++){
+                obj[i] = encode$(obj[i]);
+            };
+        }
+        else{
+            //logger.debug("Type", (typeof obj), obj)
+            for(var key in obj){
+                var val = encode$(obj[key]);
+                if(key.indexOf('$')==0){
+                    delete obj[key];
+                    key = "_mongo_"+key;
+                }
+                obj[key] = val;
+            }            
+        }
+        return obj;
+    }
+   
+    var autoThrower = null;
+    var handleReturn = function(retval, callback, deferred, error){
+        if(error){
+           if(typeof(error)!=='object') error = {message:error}
+           error.toString =  function(){
+                this.consumed = true;
+                return  this.message || Object.toString.call(this);
+           }
+        }  
+        if(callback) return callback(error, retval);
+        return  error? deferred.reject(error) : deferred.resolve(retval);
+    }
+
+    function staticInvoker(modelClass, methodName, methodArgs) {
+        return invoker( modelClass,  methodName, methodArgs, null);
+
+    };
+    function instanceInvoker(modelClass, model, methodName, methodArgs) {
+        //var modelClass = getClass(model.classname$)
+        return invoker( modelClass, methodName, methodArgs, model);
+    }
+    function invoker(modelClass, methodName, methodArgs, modelInstance) {
+        // modelInstance can be null, everything else is required.
+        var modelName =  modelClass.modelName;
+        logger.trace("invoker: ", modelName, methodName, methodArgs);
+        var callback = null;
+        var isStatic = modelInstance==null;
+        var depends = modelClass.dependencies$;
+        var data = {
+            method : methodName,
+            seqnumber : nextCounter(),
+            args : [],
+            clazz: modelName,
+            static: isStatic
+        }
+        for (var i = 0; methodArgs && methodArgs.length > i; i++) {
+            if(typeof methodArgs[i] != 'function')
+                data.args.push(methodArgs[i]);
+            else{
+                callback = methodArgs[i]
+                data.args.push("$callback")
+                logger.debug("Callback provided");
+            }
+        }
+        if(!isStatic) {
+            data.instance = modelInstance;  // including model instance data for instance methods
+        } 
+
+        // angular http ignores all key names starting with $, this will break the mongo query
+        data = encode$(data);
+        var callname = modelName+"."+methodName;
+        logger.debug("****** BEGIN RMI #", data.seqnumber, callname, data);
+        var http = depends['http'];
+        var theQ = depends['promise'];
+        if (!http || !theQ) throw "Missing http and/or Q dependencies";
+        var deferred = theQ.defer();
+        var ret = http.post((getConfigs().urlPrefix || '/angoose') + "/rmi/" + modelName + "/" + methodName, data);
+        ret.done(function(retdata) {
+        logger.debug("====== END RMI #", data.seqnumber, callname, " Result:", retdata);
+            var val = undefined;
+            //@todo construct object, ret value types:  1) model data, 2) list of model data, 3) String, 4) object
+            if (retdata && retdata.retval  && ( retdata.datatype =='model' || retdata.datatype =='models')) {
+                
+                if(retdata.datatype == 'model'){
+                    val = newInstance(modelClass,   retdata.retval);
+                }
+                else{
+                    var models = [];
+                    for(var i =0; i< retdata.retval.length; i++){
+                        models.push( newInstance(modelClass, retdata.retval[i]));
+                    }
+                    val = models;    
+                }    
+                //return handleReturn(val, callback, deferred);
+                //                
+                //return deferred.resolve(models);
+            }
+            if (retdata && retdata.instance && !isStatic) {
+                // state has been changed on the server side
+                modelInstance.mergeData(retdata.instance);
+                 logger.trace("Merged server side data", modelInstance);
+            }
+            if(retdata.success)
+                return handleReturn(val || retdata.retval, callback, deferred);
+            var ex = retdata.exception? retdata.exception : retdata;
+            return handleReturn(null, callback, deferred, ex);
+            //deferred.reject(ex)
+        }, function(errdata) {
+        logger.debug("====== END RMI #", data.seqnumber,callname, " Error:", errdata);
+            if(!errdata) return handleReturn(errdata, callback, deferred, "Unexpected server error occurred.");
+            var ex =  errdata && errdata.exception ? errdata.exception: {message:errdata};
+            //var ex = errdata.exception?  (errdata.exception.message || errdata.exception.value) : errdata;
+            return handleReturn(null, callback, deferred, ex);
+            //return deferred.reject(ex);
+        })
+        if(!callback) return deferred.promise;
+    }
+    function newInstance(clazz, jsonData){
+        if(jsonData && jsonData.__t && jsonData.__t !== clazz.name ){
+            clazz  = getClass(jsonData.__t) || clazz;  //@todo: __t handling is not long term solution 
+        }
+        return new clazz(jsonData);
+    }
+    function createProxy(module, funcName, func, funcType){
+        if(typeof(func) == 'function') return func;
+        if(typeof(func) == "string" && func.indexOf("function") == 0){
+            var vname;
+            return eval("vname="+func);
+        }
+        if(funcType == 'static'){
+            return function proxy(){
+                return staticInvoker(module, funcName, arguments);   
+            }    
+        };
+        if(funcType == 'instance'){
+            return function proxy(){
+                return instanceInvoker(module, this, funcName, arguments);   
+            }    
+        };
+        
+    }
+    /** compile the model based on the server side schema */
+    function compile(modelName, schema, dependencies) {
+         logger.trace("Compiling schema " , modelName)
+        var model = function AngooseModule(data) {
+            //@todo proper clone
+            for (var i in data) {
+                this[i] = data[i];
+            }
+        };
+        
+        // static methods
+        for(var name in schema.statics){
+            model[name] = createProxy(model, name,  schema.statics[name], 'static');
+        }
+        for(var name in schema.methods){
+            model.prototype[name] = createProxy(model, name,  schema.methods[name], 'instance');
+        }
+        
+        //model.angoose$ = staticInvoker;
+        model.dependencies$ = dependencies;
+        model.schema = schema;
+        //model.prototype.angoose$ = instanceInvoker;
+        //model.prototype.classname$ = modelName;
+        //model.prototype.schema$ = schema;
+        model.prototype.get = getter;
+        model.prototype.set = setter;
+        model.modelName = modelName; // this is to be compatible with backend mongoose
+        model.name = modelName; 
+
+        // merge data into this instance
+        model.prototype.mergeData = function(source) {
+            if ( typeof source != "object")
+                throw "Invalid source object, must be an model instance";
+            //@todo: proper implementation
+            for (var i in source) {
+                this[i] = source[i];
+            }
+        }
+        AngooseClient.models = AngooseClient.models || {};
+        AngooseClient.models[modelName] = model;
+        return model;
+    };
+
+    function modelNames() {
+        var ret = [];
+        for (var key in getSchemas()) {
+            ret.push(key);
+        }
+        return ret;
+    };
+    
+    function config(path, val){
+        var options = getConfigs();
+        if(!path) return options; /**@todo: probably a deep copy */
+        
+        if(typeof (path) === 'string'){
+             if(val === undefined)
+                return  getter.call(options, path);
+             setter.call(options, path, val);
+        }
+    }
+
+    function init(dependencies) {
+        if (AngooseClient.initialized) {
+             logger.debug("init has been called");
+            return;
+        }
+        AngooseClient.dependencies = dependencies;
+         logger.debug("Creating client side proxies for backend modules");
+        for (var mName in getSchemas()) {
+            compile(mName, getSchemas()[mName], dependencies);
+        }
+        AngooseClient.initialized = true;
+    };
+    function getClass(name) {
+        if (!AngooseClient.initialized)
+            throw "Angoose models not initialized yet";
+        name = camelcase(name);
+        return AngooseClient.models[name];
+    };
+    
+     function getter(path) {
+         if(!path) return undefined;
+          var   pieces = path.split('.');
+          var obj = this;
+          for (var i = 0, l = pieces.length; i < l; i++) {
+            obj = undefined === obj || null === obj
+              ? undefined
+              : obj[pieces[i]];
+          }
+          return obj;
+    };
+    function  setter(path, val){
+    if(!path  || typeof(path)!='string') return;
+     var   pieces = path.split('.');
+      var obj = this;
+      for (var i = 0, len = pieces.length; i < len; i++) {
+          if(i+1  == len ) // last one
+          {
+              obj[ pieces[i]] = val;
+              return;
+          }
+          obj[pieces[i]] = obj[pieces[i]] || {};
+          obj = obj[pieces[i]] || {};
+      }
+    }
+     function camelcase(name, space){
+        // converting client-user to ClientUser 
+        if(!name) return name;
+        var parts = name.split("-");
+        name = "";
+        for(var i=0;i< parts.length;i++){
+            if(parts[i] && parts[i].length>0){
+                name = name && space ? name+" ":name;
+                name+= parts[i].substring(0,1).toUpperCase() + parts[i].substring(1);
+            } 
+        }
+        return name;
+    }    
+    function getConfigs() {  return  {"urlPrefix":"/angoose","url-prefix":"/angoose","logging":"TRACE"} };
+    function getSchemas() {  return  {
+	"MongooseExtension": {
+		"moduleName": "MongooseExtension",
+		"methods": {},
+		"statics": {
+			"postResolveTarget": "$PROXIED$",
+			"postInvoke": "$PROXIED$",
+			"postPack": "$PROXIED$",
+			"postExportModule": "$PROXIED$",
+			"afterFormatError": "$PROXIED$",
+			"config": "$PROXIED$"
+		}
+	},
+	"LoginService": {
+		"moduleName": "LoginService",
+		"methods": {},
+		"statics": {
+			"signin": "$PROXIED$",
+			"signout": "$PROXIED$",
+			"config": "$PROXIED$"
+		}
+	},
+	"AngooseUI": {
+		"moduleName": "AngooseUI",
+		"methods": {},
+		"statics": {
+			"afterCreateBundle": "$PROXIED$",
+			"config": "$PROXIED$"
+		}
+	},
+	"AngooseAuthorization": {
+		"moduleName": "AngooseAuthorization",
+		"methods": {},
+		"statics": {
+			"preAuthorize": "$PROXIED$",
+			"postAuthorize": "$PROXIED$",
+			"preRedact": "$PROXIED$",
+			"postInvoke": "$PROXIED$",
+			"beforeCreateBundle": "$PROXIED$",
+			"config": "$PROXIED$"
+		}
+	},
+	"AngooseUser": {
+		"moduleName": "AngooseUser",
+		"methods": {
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"email": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "email",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true,
+					"label": "Email",
+					"match": [
+						{},
+						"Email is not valid"
+					],
+					"unique": true,
+					"tags": [
+						"default-list"
+					]
+				},
+				"_index": {
+					"unique": true,
+					"background": true
+				},
+				"isRequired": true
+			},
+			"name.first": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "name.first",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"label": "First Name"
+				},
+				"_index": null
+			},
+			"name.middle": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "name.middle",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"label": "Middle Name"
+				},
+				"_index": null
+			},
+			"name.last": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "name.last",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"label": "Last Name"
+				},
+				"_index": null
+			},
+			"status": {
+				"enumValues": [
+					"active",
+					"disabled",
+					"archived"
+				],
+				"regExp": null,
+				"path": "status",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true,
+					"label": "Status",
+					"enum": [
+						"active",
+						"disabled",
+						"archived"
+					],
+					"default": "active",
+					"tags": [
+						"default-list"
+					]
+				},
+				"_index": null,
+				"isRequired": true,
+				"defaultValue": "active"
+			},
+			"password": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "password",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true,
+					"label": "Password"
+				},
+				"_index": null,
+				"isRequired": true
+			},
+			"roles": {
+				"enumValues": [
+					"admin",
+					"manager",
+					"content-admin",
+					"user"
+				],
+				"regExp": null,
+				"path": "roles",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"enum": [
+						"admin",
+						"manager",
+						"content-admin",
+						"user"
+					],
+					"default": "user",
+					"label": "User Role",
+					"required": true,
+					"tags": [
+						"default-list"
+					]
+				},
+				"_index": null,
+				"defaultValue": "user",
+				"isRequired": true
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"collection": "angoose_users",
+			"label": "User",
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"discriminatorKey": "__t",
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	},
+	"SampleUser": {
+		"moduleName": "SampleUser",
+		"methods": {
+			"getFullname": "function portable(){\n    //_instance_portable\n    console.log(\"getFullname\", this);\n    return  (this.firstname ? this.firstname +\" \": \"\") + (this.lastname || \"\");\n}",
+			"setPassword": "$PROXIED$",
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"getSample": "$PROXIED$",
+			"checkExists": "$PROXIED$",
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"email": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "email",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true,
+					"match": {},
+					"unique": true
+				},
+				"_index": {
+					"unique": true,
+					"background": true
+				},
+				"isRequired": true
+			},
+			"firstname": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "firstname",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true
+				},
+				"_index": null,
+				"isRequired": true
+			},
+			"lastname": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "lastname",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true
+				},
+				"_index": null,
+				"isRequired": true
+			},
+			"status": {
+				"enumValues": [
+					"inactive",
+					"active",
+					"disabled",
+					"archived"
+				],
+				"regExp": null,
+				"path": "status",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"enum": [
+						"inactive",
+						"active",
+						"disabled",
+						"archived"
+					],
+					"required": true,
+					"def": "inactive"
+				},
+				"_index": null,
+				"isRequired": true
+			},
+			"password": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "password",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String"
+				},
+				"_index": null
+			},
+			"verified": {
+				"path": "verified",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean"
+				},
+				"_index": null
+			},
+			"groupRef": {
+				"path": "groupRef",
+				"instance": "ObjectID",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"ref": "SampeUserGroup"
+				},
+				"_index": null
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"collection": "SampleUsers",
+			"discriminatorKey": "type",
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	},
+	"RaccomendedCategory": {
+		"moduleName": "RaccomendedCategory",
+		"methods": {
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"id_user": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "id_user",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String"
+				},
+				"_index": null
+			},
+			"list_raccomended": {
+				"path": "list_raccomended",
+				"setters": [],
+				"getters": [],
+				"options": {},
+				"_index": null
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"discriminatorKey": "__t",
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	},
+	"Todo": {
+		"moduleName": "Todo",
+		"methods": {
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"title": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "title",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"required": true,
+					"tags": [
+						"default-list"
+					],
+					"label": "Todo"
+				},
+				"_index": null,
+				"isRequired": true
+			},
+			"completed": {
+				"path": "completed",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"tags": [
+						"default-list"
+					],
+					"label": "Completed"
+				},
+				"_index": null
+			},
+			"description": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "description",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"template": "redactor"
+				},
+				"_index": null
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"discriminatorKey": "__t",
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	},
+	"UserTimeline": {
+		"moduleName": "UserTimeline",
+		"methods": {
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"id": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "id",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String"
+				},
+				"_index": null
+			},
+			"venues": {
+				"casterConstructor": "not-supported",
+				"caster": {
+					"path": "venues",
+					"setters": [],
+					"getters": [],
+					"options": {},
+					"_index": null
+				},
+				"path": "venues",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": [
+						{}
+					]
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"listMacro": {
+				"casterConstructor": "not-supported",
+				"caster": {
+					"path": "listMacro",
+					"setters": [],
+					"getters": [],
+					"options": {},
+					"_index": null
+				},
+				"path": "listMacro",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": []
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"discriminatorKey": "__t",
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	},
+	"Role": {
+		"moduleName": "Role",
+		"methods": {
+			"save": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"populate": "$PROXIED$"
+		},
+		"statics": {
+			"populate": "$PROXIED$",
+			"find": "$PROXIED$",
+			"findOne": "$PROXIED$",
+			"findById": "$PROXIED$",
+			"findByIdAndRemove": "$PROXIED$",
+			"findByIdAndUpdate": "$PROXIED$",
+			"findOneAndRemove": "$PROXIED$",
+			"findOneAndUpdate": "$PROXIED$",
+			"update": "$PROXIED$",
+			"remove": "$PROXIED$",
+			"count": "$PROXIED$",
+			"geoNear": "$PROXIED$",
+			"geoSearch": "$PROXIED$",
+			"create": "$PROXIED$"
+		},
+		"paths": {
+			"role": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "role",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"label": "Role",
+					"required": true,
+					"tags": [
+						"default-list"
+					],
+					"unique": true
+				},
+				"_index": {
+					"unique": true,
+					"background": true
+				},
+				"isRequired": true
+			},
+			"desc": {
+				"enumValues": [],
+				"regExp": null,
+				"path": "desc",
+				"instance": "String",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "String",
+					"label": "Description",
+					"tags": [
+						"default-list"
+					]
+				},
+				"_index": null
+			},
+			"_id": {
+				"path": "_id",
+				"instance": "ObjectID",
+				"setters": [
+					"not-supported"
+				],
+				"getters": [],
+				"options": {
+					"type": "ObjectId",
+					"auto": true
+				},
+				"_index": null,
+				"defaultValue": "not-supported"
+			},
+			"LoginService.signin": {
+				"path": "LoginService.signin",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Signin"
+				},
+				"_index": null
+			},
+			"LoginService.signout": {
+				"path": "LoginService.signout",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Signout"
+				},
+				"_index": null
+			},
+			"AngooseUser.Modify": {
+				"path": "AngooseUser.Modify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Modify"
+				},
+				"_index": null
+			},
+			"AngooseUser.Delete": {
+				"path": "AngooseUser.Delete",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Delete"
+				},
+				"_index": null
+			},
+			"AngooseUser.View": {
+				"path": "AngooseUser.View",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "View"
+				},
+				"_index": null
+			},
+			"AngooseUser.FindAndModify": {
+				"path": "AngooseUser.FindAndModify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Find And Modify"
+				},
+				"_index": null
+			},
+			"AngooseUser.Create": {
+				"path": "AngooseUser.Create",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Create"
+				},
+				"_index": null
+			},
+			"RaccomendedCategory.Modify": {
+				"path": "RaccomendedCategory.Modify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Modify"
+				},
+				"_index": null
+			},
+			"RaccomendedCategory.Delete": {
+				"path": "RaccomendedCategory.Delete",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Delete"
+				},
+				"_index": null
+			},
+			"RaccomendedCategory.View": {
+				"path": "RaccomendedCategory.View",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "View"
+				},
+				"_index": null
+			},
+			"RaccomendedCategory.FindAndModify": {
+				"path": "RaccomendedCategory.FindAndModify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Find And Modify"
+				},
+				"_index": null
+			},
+			"RaccomendedCategory.Create": {
+				"path": "RaccomendedCategory.Create",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Create"
+				},
+				"_index": null
+			},
+			"Todo.Modify": {
+				"path": "Todo.Modify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Modify"
+				},
+				"_index": null
+			},
+			"Todo.Delete": {
+				"path": "Todo.Delete",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Delete"
+				},
+				"_index": null
+			},
+			"Todo.View": {
+				"path": "Todo.View",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "View"
+				},
+				"_index": null
+			},
+			"Todo.FindAndModify": {
+				"path": "Todo.FindAndModify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Find And Modify"
+				},
+				"_index": null
+			},
+			"Todo.Create": {
+				"path": "Todo.Create",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Create"
+				},
+				"_index": null
+			},
+			"UserTimeline.Modify": {
+				"path": "UserTimeline.Modify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Modify"
+				},
+				"_index": null
+			},
+			"UserTimeline.Delete": {
+				"path": "UserTimeline.Delete",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Delete"
+				},
+				"_index": null
+			},
+			"UserTimeline.View": {
+				"path": "UserTimeline.View",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "View"
+				},
+				"_index": null
+			},
+			"UserTimeline.FindAndModify": {
+				"path": "UserTimeline.FindAndModify",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Find And Modify"
+				},
+				"_index": null
+			},
+			"UserTimeline.Create": {
+				"path": "UserTimeline.Create",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Boolean",
+					"label": "Create"
+				},
+				"_index": null
+			},
+			"__v": {
+				"path": "__v",
+				"instance": "Number",
+				"setters": [],
+				"getters": [],
+				"options": {
+					"type": "Number"
+				},
+				"_index": null
+			}
+		},
+		"options": {
+			"collection": "angoose_perms",
+			"id": true,
+			"noVirtualId": false,
+			"_id": true,
+			"noId": false,
+			"read": null,
+			"shardKey": null,
+			"autoIndex": true,
+			"minimize": true,
+			"discriminatorKey": "__t",
+			"versionKey": "__v",
+			"capped": false,
+			"bufferCommands": true,
+			"strict": true,
+			"pluralization": true
+		}
+	}
+} };
+})();
+
+/****** Angular Adapter for Angoose Client *******/
+// Angular client for Angoose automatically register the model and service classes as angular injectables. 
+// For instance, with the `SampleUser` model, you can inject in your controller:
+//
+//      angular.module('myapp', ['angoose.client'])
+//            .controller('MyCtroller', function($scope, SampleUser){
+//              $scope.users = SampleUser.$query({'status':'active'});
+//        })      
+//
+(function(){
+    var logger = AngooseClient.logger;
+    
+    if(typeof angular =='undefined'){
+        logger.error("No angular")
+        return;  
+    } 
+    logger.info("angoose-angular client adapter initializing");
+    var angularModule =  angular.module("angoose.client", []);
+    AngooseClient.client='angular';
+    
+    // ** angoose **
+    //
+    //  You may require `angoose` client as an injectable
+    //  
+    angularModule.factory('angoose', function($http, $q, $rootScope, $timeout){
+            var myQ = addDoneMethod($q);
+            AngooseClient.init({
+                http:angularHttpWrapper($http, myQ, $rootScope, $timeout),
+                promise: myQ
+            });
+            return AngooseClient;
+    })
+    function factoryFunc(modelName){
+        logger.trace("Create factory for model "+ modelName)
+        angularModule.factory(modelName , function($http, $q, $rootScope, $injector, angoose){
+            var acModel = AngooseClient.model(modelName);
+            resourceAdapt(acModel, $rootScope, $injector );
+            return acModel;
+        });
+    }
+    angular.forEach( AngooseClient.modelNames(), factoryFunc );
+
+    function addDoneMethod($q){
+        var myQ = angular.extend({}, $q)
+        myQ.defer = function(){
+            var out = $q.defer.apply($q, arguments);
+            if(out.promise.done) return out;
+            out.promise.done = function(successCallback, errorCallback){
+                out.promise.then(successCallback, errorCallback);
+            }
+            return out;
+        }
+        return myQ;
+    }
+    function angularHttpWrapper($http, $q, $rootScope, $timeout){
+        var autoThrower = null;
+        
+        var ret = {};
+        ret.post = function(){
+            var deferred = $q.defer();
+            $http.post.apply($http, arguments).success(function(data){
+                deferred.resolve(  data );
+                if(!data || !data.exception) return;
+                if(!autoThrower){
+                        data.exception.toString =    function(){
+                            this.consumed = true;
+                            return  this.message || Object.toString.call(this);
+                        }
+                        $rootScope.$emit('AngooseError', data.exception);
+                        autoThrower = $timeout(function(){
+                            autoThrower = null;
+                            if(!data.exception.consumed){
+                                console.error("Unhandled error detected, throwing", data.exception);
+                                throw data.exception;  
+                            } 
+                        }, 100);  
+                }   
+            }).error(function(err){
+                // emit angoose error
+                deferred.reject(err);
+            });
+            return deferred.promise;
+        }
+        return ret;
+    }
+    function resourceAdapt(modelClass, $rootScope, $injector){
+        // now adpat to angular resource
+        modelClass.$get= function(){
+            if(!modelClass.findOne) throw "Model does not support findOne operation";
+            var modelInstance = new modelClass();
+            modelClass.findOne.apply(modelClass, arguments).done(function(object){
+                // the return data should be a model instance
+                modelInstance.mergeData(object);
+                //$rootScope.$digest();
+                logger.trace("Copied server data to placeholder", modelInstance)
+            }, errorHandler);    
+            
+            return modelInstance;
+        };
+        modelClass.$query=function(){
+            if(!modelClass.find) throw "Model does not support find operation";
+            var models = [];
+            modelClass.find.apply(modelClass, arguments).done(function(retModels){
+                // the return data should be a list of models
+                models.length = 0;
+                for(var i=0; retModels && retModels.length>i; i++)
+                    models[i] = retModels[i];
+                //$rootScope.$digest();
+                logger.trace("Copied server data to placeholder")
+            },  errorHandler);
+            return models;
+        };
+        
+        function errorHandler(err){
+            console.error("$query/$get error: ", err);
+            // if(true) return
+            // var action = 'throw';
+            // try{
+                // var $ui = $injector.get("$ui");
+                // action = $ui.config("$query-error") || action;
+                // if(action == 'alert'){
+                    // var alerts = $injector.get("$alert");
+                    // alerts && alerts.error(err);    
+                // } 
+            // }
+            // catch(ex){
+            // }
+            // if(action === 'throw')  throw err;
+        }
+    }
+})();
+
+// testing functions
+function $anget(serviceName){
+    return angular.element(document).injector().get(serviceName)
+}// depdnencies: http, Q
+/****** jQuery plugin for Angoose Client *******/
+function angoose_jquery_adapater(){
+    if(AngooseClient.client) return;
+    if(typeof($) == 'undefined' && typeof(jQuery) == 'undefined') return;
+    AngooseClient.client = 'jquery';
+    var $ = $ || jQuery;
+    var $q = typeof(Q) == 'undefined'? createQ() : Q;
+    
+    window.console && console.log("##### Angoose Client for jQuery Initializing");
+     AngooseClient.init({
+                http: ajaxHttpWrapper(),
+                promise: $q
+            });
+     function ajaxHttpWrapper( ){
+        var ret = {};
+        ret.post = function(){
+            var deferred = $q.defer();
+            $.post.apply($, arguments).done(function(data, textStatus, jqXHR ){
+                deferred.resolve(  data );
+            }).fail(function( jqXHR, textStatus, err){
+                deferred.reject(err);
+            });
+            return deferred.promise;
+        }
+        return ret;
+    }
+   
+}
+angoose_jquery_adapater();
+ 
+/** include Q for now */
+function createQ() {
+"use strict";
+
+var hasStacks = false;
+try {
+    throw new Error();
+} catch (e) {
+    hasStacks = !!e.stack;
+}
+
+// All code after this point will be filtered from stack traces reported
+// by Q.
+var qStartingLine = captureLine();
+var qFileName;
+
+// shims
+
+// used for fallback in "allResolved"
+var noop = function () {};
+
+// Use the fastest possible means to execute a task in a future turn
+// of the event loop.
+var nextTick =(function () {
+    // linked list of tasks (single, with head node)
+    var head = {task: void 0, next: null};
+    var tail = head;
+    var flushing = false;
+    var requestTick = void 0;
+    var isNodeJS = false;
+
+    function flush() {
+        /* jshint loopfunc: true */
+
+        while (head.next) {
+            head = head.next;
+            var task = head.task;
+            head.task = void 0;
+            var domain = head.domain;
+
+            if (domain) {
+                head.domain = void 0;
+                domain.enter();
+            }
+
+            try {
+                task();
+
+            } catch (e) {
+                if (isNodeJS) {
+                    // In node, uncaught exceptions are considered fatal errors.
+                    // Re-throw them synchronously to interrupt flushing!
+
+                    // Ensure continuation if the uncaught exception is suppressed
+                    // listening "uncaughtException" events (as domains does).
+                    // Continue in next event to avoid tick recursion.
+                    if (domain) {
+                        domain.exit();
+                    }
+                    setTimeout(flush, 0);
+                    if (domain) {
+                        domain.enter();
+                    }
+
+                    throw e;
+
+                } else {
+                    // In browsers, uncaught exceptions are not fatal.
+                    // Re-throw them asynchronously to avoid slow-downs.
+                    setTimeout(function() {
+                       throw e;
+                    }, 0);
+                }
+            }
+
+            if (domain) {
+                domain.exit();
+            }
+        }
+
+        flushing = false;
+    }
+
+    nextTick = function (task) {
+        tail = tail.next = {
+            task: task,
+            domain: isNodeJS && process.domain,
+            next: null
+        };
+
+        if (!flushing) {
+            flushing = true;
+            requestTick();
+        }
+    };
+
+    if (typeof process !== "undefined" && process.nextTick) {
+        // Node.js before 0.9. Note that some fake-Node environments, like the
+        // Mocha test runner, introduce a `process` global without a `nextTick`.
+        isNodeJS = true;
+
+        requestTick = function () {
+            process.nextTick(flush);
+        };
+
+    } else if (typeof setImmediate === "function") {
+        // In IE10, Node.js 0.9+, or https://github.com/NobleJS/setImmediate
+        if (typeof window !== "undefined") {
+            requestTick = setImmediate.bind(window, flush);
+        } else {
+            requestTick = function () {
+                setImmediate(flush);
+            };
+        }
+
+    } else if (typeof MessageChannel !== "undefined") {
+        // modern browsers
+        // http://www.nonblocking.io/2011/06/windownexttick.html
+        var channel = new MessageChannel();
+        // At least Safari Version 6.0.5 (8536.30.1) intermittently cannot create
+        // working message ports the first time a page loads.
+        channel.port1.onmessage = function () {
+            requestTick = requestPortTick;
+            channel.port1.onmessage = flush;
+            flush();
+        };
+        var requestPortTick = function () {
+            // Opera requires us to provide a message payload, regardless of
+            // whether we use it.
+            channel.port2.postMessage(0);
+        };
+        requestTick = function () {
+            setTimeout(flush, 0);
+            requestPortTick();
+        };
+
+    } else {
+        // old browsers
+        requestTick = function () {
+            setTimeout(flush, 0);
+        };
+    }
+
+    return nextTick;
+})();
+
+// Attempt to make generics safe in the face of downstream
+// modifications.
+// There is no situation where this is necessary.
+// If you need a security guarantee, these primordials need to be
+// deeply frozen anyway, and if you donb t need a security guarantee,
+// this is just plain paranoid.
+// However, this **might** have the nice side-effect of reducing the size of
+// the minified code by reducing x.call() to merely x()
+// See Mark Millerb s explanation of what this does.
+// http://wiki.ecmascript.org/doku.php?id=conventions:safe_meta_programming
+var call = Function.call;
+function uncurryThis(f) {
+    return function () {
+        return call.apply(f, arguments);
+    };
+}
+// This is equivalent, but slower:
+// uncurryThis = Function_bind.bind(Function_bind.call);
+// http://jsperf.com/uncurrythis
+
+var array_slice = uncurryThis(Array.prototype.slice);
+
+var array_reduce = uncurryThis(
+    Array.prototype.reduce || function (callback, basis) {
+        var index = 0,
+            length = this.length;
+        // concerning the initial value, if one is not provided
+        if (arguments.length === 1) {
+            // seek to the first value in the array, accounting
+            // for the possibility that is is a sparse array
+            do {
+                if (index in this) {
+                    basis = this[index++];
+                    break;
+                }
+                if (++index >= length) {
+                    throw new TypeError();
+                }
+            } while (1);
+        }
+        // reduce
+        for (; index < length; index++) {
+            // account for the possibility that the array is sparse
+            if (index in this) {
+                basis = callback(basis, this[index], index);
+            }
+        }
+        return basis;
+    }
+);
+
+var array_indexOf = uncurryThis(
+    Array.prototype.indexOf || function (value) {
+        // not a very good shim, but good enough for our one use of it
+        for (var i = 0; i < this.length; i++) {
+            if (this[i] === value) {
+                return i;
+            }
+        }
+        return -1;
+    }
+);
+
+var array_map = uncurryThis(
+    Array.prototype.map || function (callback, thisp) {
+        var self = this;
+        var collect = [];
+        array_reduce(self, function (undefined, value, index) {
+            collect.push(callback.call(thisp, value, index, self));
+        }, void 0);
+        return collect;
+    }
+);
+
+var object_create = Object.create || function (prototype) {
+    function Type() { }
+    Type.prototype = prototype;
+    return new Type();
+};
+
+var object_hasOwnProperty = uncurryThis(Object.prototype.hasOwnProperty);
+
+var object_keys = Object.keys || function (object) {
+    var keys = [];
+    for (var key in object) {
+        if (object_hasOwnProperty(object, key)) {
+            keys.push(key);
+        }
+    }
+    return keys;
+};
+
+var object_toString = uncurryThis(Object.prototype.toString);
+
+function isObject(value) {
+    return value === Object(value);
+}
+
+// generator related shims
+
+// FIXME: Remove this function once ES6 generators are in SpiderMonkey.
+function isStopIteration(exception) {
+    return (
+        object_toString(exception) === "[object StopIteration]" ||
+        exception instanceof QReturnValue
+    );
+}
+
+// FIXME: Remove this helper and Q.return once ES6 generators are in
+// SpiderMonkey.
+var QReturnValue;
+if (typeof ReturnValue !== "undefined") {
+    QReturnValue = ReturnValue;
+} else {
+    QReturnValue = function (value) {
+        this.value = value;
+    };
+}
+
+// Until V8 3.19 / Chromium 29 is released, SpiderMonkey is the only
+// engine that has a deployed base of browsers that support generators.
+// However, SM's generators use the Python-inspired semantics of
+// outdated ES6 drafts.  We would like to support ES6, but we'd also
+// like to make it possible to use generators in deployed browsers, so
+// we also support Python-style generators.  At some point we can remove
+// this block.
+var hasES6Generators;
+try {
+    /* jshint evil: true, nonew: false */
+    new Function("(function* (){ yield 1; })");
+    hasES6Generators = true;
+} catch (e) {
+    hasES6Generators = false;
+}
+
+// long stack traces
+
+var STACK_JUMP_SEPARATOR = "From previous event:";
+
+function makeStackTraceLong(error, promise) {
+    // If possible, transform the error stack trace by removing Node and Q
+    // cruft, then concatenating with the stack trace of `promise`. See #57.
+    if (hasStacks &&
+        promise.stack &&
+        typeof error === "object" &&
+        error !== null &&
+        error.stack &&
+        error.stack.indexOf(STACK_JUMP_SEPARATOR) === -1
+    ) {
+        var stacks = [];
+        for (var p = promise; !!p; p = p.source) {
+            if (p.stack) {
+                stacks.unshift(p.stack);
+            }
+        }
+        stacks.unshift(error.stack);
+
+        var concatedStacks = stacks.join("\n" + STACK_JUMP_SEPARATOR + "\n");
+        error.stack = filterStackString(concatedStacks);
+    }
+}
+
+function filterStackString(stackString) {
+    var lines = stackString.split("\n");
+    var desiredLines = [];
+    for (var i = 0; i < lines.length; ++i) {
+        var line = lines[i];
+
+        if (!isInternalFrame(line) && !isNodeFrame(line) && line) {
+            desiredLines.push(line);
+        }
+    }
+    return desiredLines.join("\n");
+}
+
+function isNodeFrame(stackLine) {
+    return stackLine.indexOf("(module.js:") !== -1 ||
+           stackLine.indexOf("(node.js:") !== -1;
+}
+
+function getFileNameAndLineNumber(stackLine) {
+    // Named functions: "at functionName (filename:lineNumber:columnNumber)"
+    // In IE10 function name can have spaces ("Anonymous function") O_o
+    var attempt1 = /at .+ \((.+):(\d+):(?:\d+)\)$/.exec(stackLine);
+    if (attempt1) {
+        return [attempt1[1], Number(attempt1[2])];
+    }
+
+    // Anonymous functions: "at filename:lineNumber:columnNumber"
+    var attempt2 = /at ([^ ]+):(\d+):(?:\d+)$/.exec(stackLine);
+    if (attempt2) {
+        return [attempt2[1], Number(attempt2[2])];
+    }
+
+    // Firefox style: "function@filename:lineNumber or @filename:lineNumber"
+    var attempt3 = /.*@(.+):(\d+)$/.exec(stackLine);
+    if (attempt3) {
+        return [attempt3[1], Number(attempt3[2])];
+    }
+}
+
+function isInternalFrame(stackLine) {
+    var fileNameAndLineNumber = getFileNameAndLineNumber(stackLine);
+
+    if (!fileNameAndLineNumber) {
+        return false;
+    }
+
+    var fileName = fileNameAndLineNumber[0];
+    var lineNumber = fileNameAndLineNumber[1];
+
+    return fileName === qFileName &&
+        lineNumber >= qStartingLine &&
+        lineNumber <= qEndingLine;
+}
+
+// discover own file name and line number range for filtering stack
+// traces
+function captureLine() {
+    if (!hasStacks) {
+        return;
+    }
+
+    try {
+        throw new Error();
+    } catch (e) {
+        var lines = e.stack.split("\n");
+        var firstLine = lines[0].indexOf("@") > 0 ? lines[1] : lines[2];
+        var fileNameAndLineNumber = getFileNameAndLineNumber(firstLine);
+        if (!fileNameAndLineNumber) {
+            return;
+        }
+
+        qFileName = fileNameAndLineNumber[0];
+        return fileNameAndLineNumber[1];
+    }
+}
+
+function deprecate(callback, name, alternative) {
+    return function () {
+        if (typeof console !== "undefined" &&
+            typeof console.warn === "function") {
+            console.warn(name + " is deprecated, use " + alternative +
+                         " instead.", new Error("").stack);
+        }
+        return callback.apply(callback, arguments);
+    };
+}
+
+// end of shims
+// beginning of real work
+
+/**
+ * Constructs a promise for an immediate reference, passes promises through, or
+ * coerces promises from different systems.
+ * @param value immediate reference or promise
+ */
+function Q(value) {
+    // If the object is already a Promise, return it directly.  This enables
+    // the resolve function to both be used to created references from objects,
+    // but to tolerably coerce non-promises to promises.
+    if (isPromise(value)) {
+        return value;
+    }
+
+    // assimilate thenables
+    if (isPromiseAlike(value)) {
+        return coerce(value);
+    } else {
+        return fulfill(value);
+    }
+}
+Q.resolve = Q;
+
+/**
+ * Performs a task in a future turn of the event loop.
+ * @param {Function} task
+ */
+Q.nextTick = nextTick;
+
+/**
+ * Controls whether or not long stack traces will be on
+ */
+Q.longStackSupport = false;
+
+/**
+ * Constructs a {promise, resolve, reject} object.
+ *
+ * `resolve` is a callback to invoke with a more resolved value for the
+ * promise. To fulfill the promise, invoke `resolve` with any value that is
+ * not a thenable. To reject the promise, invoke `resolve` with a rejected
+ * thenable, or invoke `reject` with the reason directly. To resolve the
+ * promise to another thenable, thus putting it in the same state, invoke
+ * `resolve` with that other thenable.
+ */
+Q.defer = defer;
+function defer() {
+    // if "messages" is an "Array", that indicates that the promise has not yet
+    // been resolved.  If it is "undefined", it has been resolved.  Each
+    // element of the messages array is itself an array of complete arguments to
+    // forward to the resolved promise.  We coerce the resolution value to a
+    // promise using the `resolve` function because it handles both fully
+    // non-thenable values and other thenables gracefully.
+    var messages = [], progressListeners = [], resolvedPromise;
+
+    var deferred = object_create(defer.prototype);
+    var promise = object_create(Promise.prototype);
+
+    promise.promiseDispatch = function (resolve, op, operands) {
+        var args = array_slice(arguments);
+        if (messages) {
+            messages.push(args);
+            if (op === "when" && operands[1]) { // progress operand
+                progressListeners.push(operands[1]);
+            }
+        } else {
+            nextTick(function () {
+                resolvedPromise.promiseDispatch.apply(resolvedPromise, args);
+            });
+        }
+    };
+
+    // XXX deprecated
+    promise.valueOf = function () {
+        if (messages) {
+            return promise;
+        }
+        var nearerValue = nearer(resolvedPromise);
+        if (isPromise(nearerValue)) {
+            resolvedPromise = nearerValue; // shorten chain
+        }
+        return nearerValue;
+    };
+
+    promise.inspect = function () {
+        if (!resolvedPromise) {
+            return { state: "pending" };
+        }
+        return resolvedPromise.inspect();
+    };
+
+    if (Q.longStackSupport && hasStacks) {
+        try {
+            throw new Error();
+        } catch (e) {
+            // NOTE: don't try to use `Error.captureStackTrace` or transfer the
+            // accessor around; that causes memory leaks as per GH-111. Just
+            // reify the stack trace as a string ASAP.
+            //
+            // At the same time, cut off the first line; it's always just
+            // "[object Promise]\n", as per the `toString`.
+            promise.stack = e.stack.substring(e.stack.indexOf("\n") + 1);
+        }
+    }
+
+    // NOTE: we do the checks for `resolvedPromise` in each method, instead of
+    // consolidating them into `become`, since otherwise we'd create new
+    // promises with the lines `become(whatever(value))`. See e.g. GH-252.
+
+    function become(newPromise) {
+        resolvedPromise = newPromise;
+        promise.source = newPromise;
+
+        array_reduce(messages, function (undefined, message) {
+            nextTick(function () {
+                newPromise.promiseDispatch.apply(newPromise, message);
+            });
+        }, void 0);
+
+        messages = void 0;
+        progressListeners = void 0;
+    }
+
+    deferred.promise = promise;
+    deferred.resolve = function (value) {
+        if (resolvedPromise) {
+            return;
+        }
+
+        become(Q(value));
+    };
+
+    deferred.fulfill = function (value) {
+        if (resolvedPromise) {
+            return;
+        }
+
+        become(fulfill(value));
+    };
+    deferred.reject = function (reason) {
+        if (resolvedPromise) {
+            return;
+        }
+
+        become(reject(reason));
+    };
+    deferred.notify = function (progress) {
+        if (resolvedPromise) {
+            return;
+        }
+
+        array_reduce(progressListeners, function (undefined, progressListener) {
+            nextTick(function () {
+                progressListener(progress);
+            });
+        }, void 0);
+    };
+
+    return deferred;
+}
+
+/**
+ * Creates a Node-style callback that will resolve or reject the deferred
+ * promise.
+ * @returns a nodeback
+ */
+defer.prototype.makeNodeResolver = function () {
+    var self = this;
+    return function (error, value) {
+        if (error) {
+            self.reject(error);
+        } else if (arguments.length > 2) {
+            self.resolve(array_slice(arguments, 1));
+        } else {
+            self.resolve(value);
+        }
+    };
+};
+
+/**
+ * @param resolver {Function} a function that returns nothing and accepts
+ * the resolve, reject, and notify functions for a deferred.
+ * @returns a promise that may be resolved with the given resolve and reject
+ * functions, or rejected by a thrown exception in resolver
+ */
+Q.promise = promise;
+function promise(resolver) {
+    if (typeof resolver !== "function") {
+        throw new TypeError("resolver must be a function.");
+    }
+    var deferred = defer();
+    try {
+        resolver(deferred.resolve, deferred.reject, deferred.notify);
+    } catch (reason) {
+        deferred.reject(reason);
+    }
+    return deferred.promise;
+}
+
+// XXX experimental.  This method is a way to denote that a local value is
+// serializable and should be immediately dispatched to a remote upon request,
+// instead of passing a reference.
+Q.passByCopy = function (object) {
+    //freeze(object);
+    //passByCopies.set(object, true);
+    return object;
+};
+
+Promise.prototype.passByCopy = function () {
+    //freeze(object);
+    //passByCopies.set(object, true);
+    return this;
+};
+
+/**
+ * If two promises eventually fulfill to the same value, promises that value,
+ * but otherwise rejects.
+ * @param x {Any*}
+ * @param y {Any*}
+ * @returns {Any*} a promise for x and y if they are the same, but a rejection
+ * otherwise.
+ *
+ */
+Q.join = function (x, y) {
+    return Q(x).join(y);
+};
+
+Promise.prototype.join = function (that) {
+    return Q([this, that]).spread(function (x, y) {
+        if (x === y) {
+            // TODO: "===" should be Object.is or equiv
+            return x;
+        } else {
+            throw new Error("Can't join: not the same: " + x + " " + y);
+        }
+    });
+};
+
+/**
+ * Returns a promise for the first of an array of promises to become fulfilled.
+ * @param answers {Array[Any*]} promises to race
+ * @returns {Any*} the first promise to be fulfilled
+ */
+Q.race = race;
+function race(answerPs) {
+    return promise(function(resolve, reject) {
+        // Switch to this once we can assume at least ES5
+        // answerPs.forEach(function(answerP) {
+        //     Q(answerP).then(resolve, reject);
+        // });
+        // Use this in the meantime
+        for (var i = 0, len = answerPs.length; i < len; i++) {
+            Q(answerPs[i]).then(resolve, reject);
+        }
+    });
+}
+
+Promise.prototype.race = function () {
+    return this.then(Q.race);
+};
+
+/**
+ * Constructs a Promise with a promise descriptor object and optional fallback
+ * function.  The descriptor contains methods like when(rejected), get(name),
+ * set(name, value), post(name, args), and delete(name), which all
+ * return either a value, a promise for a value, or a rejection.  The fallback
+ * accepts the operation name, a resolver, and any further arguments that would
+ * have been forwarded to the appropriate method above had a method been
+ * provided with the proper name.  The API makes no guarantees about the nature
+ * of the returned object, apart from that it is usable whereever promises are
+ * bought and sold.
+ */
+Q.makePromise = Promise;
+function Promise(descriptor, fallback, inspect) {
+    if (fallback === void 0) {
+        fallback = function (op) {
+            return reject(new Error(
+                "Promise does not support operation: " + op
+            ));
+        };
+    }
+    if (inspect === void 0) {
+        inspect = function () {
+            return {state: "unknown"};
+        };
+    }
+
+    var promise = object_create(Promise.prototype);
+
+    promise.promiseDispatch = function (resolve, op, args) {
+        var result;
+        try {
+            if (descriptor[op]) {
+                result = descriptor[op].apply(promise, args);
+            } else {
+                result = fallback.call(promise, op, args);
+            }
+        } catch (exception) {
+            result = reject(exception);
+        }
+        if (resolve) {
+            resolve(result);
+        }
+    };
+
+    promise.inspect = inspect;
+
+    // XXX deprecated `valueOf` and `exception` support
+    if (inspect) {
+        var inspected = inspect();
+        if (inspected.state === "rejected") {
+            promise.exception = inspected.reason;
+        }
+
+        promise.valueOf = function () {
+            var inspected = inspect();
+            if (inspected.state === "pending" ||
+                inspected.state === "rejected") {
+                return promise;
+            }
+            return inspected.value;
+        };
+    }
+
+    return promise;
+}
+
+Promise.prototype.toString = function () {
+    return "[object Promise]";
+};
+
+Promise.prototype.then = function (fulfilled, rejected, progressed) {
+    var self = this;
+    var deferred = defer();
+    var done = false;   // ensure the untrusted promise makes at most a
+                        // single call to one of the callbacks
+
+    function _fulfilled(value) {
+        try {
+            return typeof fulfilled === "function" ? fulfilled(value) : value;
+        } catch (exception) {
+            return reject(exception);
+        }
+    }
+
+    function _rejected(exception) {
+        if (typeof rejected === "function") {
+            makeStackTraceLong(exception, self);
+            try {
+                return rejected(exception);
+            } catch (newException) {
+                return reject(newException);
+            }
+        }
+        return reject(exception);
+    }
+
+    function _progressed(value) {
+        return typeof progressed === "function" ? progressed(value) : value;
+    }
+
+    nextTick(function () {
+        self.promiseDispatch(function (value) {
+            if (done) {
+                return;
+            }
+            done = true;
+
+            deferred.resolve(_fulfilled(value));
+        }, "when", [function (exception) {
+            if (done) {
+                return;
+            }
+            done = true;
+
+            deferred.resolve(_rejected(exception));
+        }]);
+    });
+
+    // Progress propagator need to be attached in the current tick.
+    self.promiseDispatch(void 0, "when", [void 0, function (value) {
+        var newValue;
+        var threw = false;
+        try {
+            newValue = _progressed(value);
+        } catch (e) {
+            threw = true;
+            if (Q.onerror) {
+                Q.onerror(e);
+            } else {
+                throw e;
+            }
+        }
+
+        if (!threw) {
+            deferred.notify(newValue);
+        }
+    }]);
+
+    return deferred.promise;
+};
+
+/**
+ * Registers an observer on a promise.
+ *
+ * Guarantees:
+ *
+ * 1. that fulfilled and rejected will be called only once.
+ * 2. that either the fulfilled callback or the rejected callback will be
+ *    called, but not both.
+ * 3. that fulfilled and rejected will not be called in this turn.
+ *
+ * @param value      promise or immediate reference to observe
+ * @param fulfilled  function to be called with the fulfilled value
+ * @param rejected   function to be called with the rejection exception
+ * @param progressed function to be called on any progress notifications
+ * @return promise for the return value from the invoked callback
+ */
+Q.when = when;
+function when(value, fulfilled, rejected, progressed) {
+    return Q(value).then(fulfilled, rejected, progressed);
+}
+
+Promise.prototype.thenResolve = function (value) {
+    return this.then(function () { return value; });
+};
+
+Q.thenResolve = function (promise, value) {
+    return Q(promise).thenResolve(value);
+};
+
+Promise.prototype.thenReject = function (reason) {
+    return this.then(function () { throw reason; });
+};
+
+Q.thenReject = function (promise, reason) {
+    return Q(promise).thenReject(reason);
+};
+
+/**
+ * If an object is not a promise, it is as "near" as possible.
+ * If a promise is rejected, it is as "near" as possible too.
+ * If itb s a fulfilled promise, the fulfillment value is nearer.
+ * If itb s a deferred promise and the deferred has been resolved, the
+ * resolution is "nearer".
+ * @param object
+ * @returns most resolved (nearest) form of the object
+ */
+
+// XXX should we re-do this?
+Q.nearer = nearer;
+function nearer(value) {
+    if (isPromise(value)) {
+        var inspected = value.inspect();
+        if (inspected.state === "fulfilled") {
+            return inspected.value;
+        }
+    }
+    return value;
+}
+
+/**
+ * @returns whether the given object is a promise.
+ * Otherwise it is a fulfilled value.
+ */
+Q.isPromise = isPromise;
+function isPromise(object) {
+    return isObject(object) &&
+        typeof object.promiseDispatch === "function" &&
+        typeof object.inspect === "function";
+}
+
+Q.isPromiseAlike = isPromiseAlike;
+function isPromiseAlike(object) {
+    return isObject(object) && typeof object.then === "function";
+}
+
+/**
+ * @returns whether the given object is a pending promise, meaning not
+ * fulfilled or rejected.
+ */
+Q.isPending = isPending;
+function isPending(object) {
+    return isPromise(object) && object.inspect().state === "pending";
+}
+
+Promise.prototype.isPending = function () {
+    return this.inspect().state === "pending";
+};
+
+/**
+ * @returns whether the given object is a value or fulfilled
+ * promise.
+ */
+Q.isFulfilled = isFulfilled;
+function isFulfilled(object) {
+    return !isPromise(object) || object.inspect().state === "fulfilled";
+}
+
+Promise.prototype.isFulfilled = function () {
+    return this.inspect().state === "fulfilled";
+};
+
+/**
+ * @returns whether the given object is a rejected promise.
+ */
+Q.isRejected = isRejected;
+function isRejected(object) {
+    return isPromise(object) && object.inspect().state === "rejected";
+}
+
+Promise.prototype.isRejected = function () {
+    return this.inspect().state === "rejected";
+};
+
+//// BEGIN UNHANDLED REJECTION TRACKING
+
+// This promise library consumes exceptions thrown in handlers so they can be
+// handled by a subsequent promise.  The exceptions get added to this array when
+// they are created, and removed when they are handled.  Note that in ES6 or
+// shimmed environments, this would naturally be a `Set`.
+var unhandledReasons = [];
+var unhandledRejections = [];
+var unhandledReasonsDisplayed = false;
+var trackUnhandledRejections = true;
+function displayUnhandledReasons() {
+    if (
+        !unhandledReasonsDisplayed &&
+        typeof window !== "undefined" &&
+        window.console
+    ) {
+        console.warn("[Q] Unhandled rejection reasons (should be empty):",
+                     unhandledReasons);
+    }
+
+    unhandledReasonsDisplayed = true;
+}
+
+function logUnhandledReasons() {
+    for (var i = 0; i < unhandledReasons.length; i++) {
+        var reason = unhandledReasons[i];
+        console.warn("Unhandled rejection reason:", reason);
+    }
+}
+
+function resetUnhandledRejections() {
+    unhandledReasons.length = 0;
+    unhandledRejections.length = 0;
+    unhandledReasonsDisplayed = false;
+
+    if (!trackUnhandledRejections) {
+        trackUnhandledRejections = true;
+
+        // Show unhandled rejection reasons if Node exits without handling an
+        // outstanding rejection.  (Note that Browserify presently produces a
+        // `process` global without the `EventEmitter` `on` method.)
+        if (typeof process !== "undefined" && process.on) {
+            process.on("exit", logUnhandledReasons);
+        }
+    }
+}
+
+function trackRejection(promise, reason) {
+    if (!trackUnhandledRejections) {
+        return;
+    }
+
+    unhandledRejections.push(promise);
+    if (reason && typeof reason.stack !== "undefined") {
+        unhandledReasons.push(reason.stack);
+    } else {
+        unhandledReasons.push("(no stack) " + reason);
+    }
+    displayUnhandledReasons();
+}
+
+function untrackRejection(promise) {
+    if (!trackUnhandledRejections) {
+        return;
+    }
+
+    var at = array_indexOf(unhandledRejections, promise);
+    if (at !== -1) {
+        unhandledRejections.splice(at, 1);
+        unhandledReasons.splice(at, 1);
+    }
+}
+
+Q.resetUnhandledRejections = resetUnhandledRejections;
+
+Q.getUnhandledReasons = function () {
+    // Make a copy so that consumers can't interfere with our internal state.
+    return unhandledReasons.slice();
+};
+
+Q.stopUnhandledRejectionTracking = function () {
+    resetUnhandledRejections();
+    if (typeof process !== "undefined" && process.on) {
+        process.removeListener("exit", logUnhandledReasons);
+    }
+    trackUnhandledRejections = false;
+};
+
+resetUnhandledRejections();
+
+//// END UNHANDLED REJECTION TRACKING
+
+/**
+ * Constructs a rejected promise.
+ * @param reason value describing the failure
+ */
+Q.reject = reject;
+function reject(reason) {
+    var rejection = Promise({
+        "when": function (rejected) {
+            // note that the error has been handled
+            if (rejected) {
+                untrackRejection(this);
+            }
+            return rejected ? rejected(reason) : this;
+        }
+    }, function fallback() {
+        return this;
+    }, function inspect() {
+        return { state: "rejected", reason: reason };
+    });
+
+    // Note that the reason has not been handled.
+    trackRejection(rejection, reason);
+
+    return rejection;
+}
+
+/**
+ * Constructs a fulfilled promise for an immediate reference.
+ * @param value immediate reference
+ */
+Q.fulfill = fulfill;
+function fulfill(value) {
+    return Promise({
+        "when": function () {
+            return value;
+        },
+        "get": function (name) {
+            return value[name];
+        },
+        "set": function (name, rhs) {
+            value[name] = rhs;
+        },
+        "delete": function (name) {
+            delete value[name];
+        },
+        "post": function (name, args) {
+            // Mark Miller proposes that post with no name should apply a
+            // promised function.
+            if (name === null || name === void 0) {
+                return value.apply(void 0, args);
+            } else {
+                return value[name].apply(value, args);
+            }
+        },
+        "apply": function (thisp, args) {
+            return value.apply(thisp, args);
+        },
+        "keys": function () {
+            return object_keys(value);
+        }
+    }, void 0, function inspect() {
+        return { state: "fulfilled", value: value };
+    });
+}
+
+/**
+ * Converts thenables to Q promises.
+ * @param promise thenable promise
+ * @returns a Q promise
+ */
+function coerce(promise) {
+    var deferred = defer();
+    nextTick(function () {
+        try {
+            promise.then(deferred.resolve, deferred.reject, deferred.notify);
+        } catch (exception) {
+            deferred.reject(exception);
+        }
+    });
+    return deferred.promise;
+}
+
+/**
+ * Annotates an object such that it will never be
+ * transferred away from this process over any promise
+ * communication channel.
+ * @param object
+ * @returns promise a wrapping of that object that
+ * additionally responds to the "isDef" message
+ * without a rejection.
+ */
+Q.master = master;
+function master(object) {
+    return Promise({
+        "isDef": function () {}
+    }, function fallback(op, args) {
+        return dispatch(object, op, args);
+    }, function () {
+        return Q(object).inspect();
+    });
+}
+
+/**
+ * Spreads the values of a promised array of arguments into the
+ * fulfillment callback.
+ * @param fulfilled callback that receives variadic arguments from the
+ * promised array
+ * @param rejected callback that receives the exception if the promise
+ * is rejected.
+ * @returns a promise for the return value or thrown exception of
+ * either callback.
+ */
+Q.spread = spread;
+function spread(value, fulfilled, rejected) {
+    return Q(value).spread(fulfilled, rejected);
+}
+
+Promise.prototype.spread = function (fulfilled, rejected) {
+    return this.all().then(function (array) {
+        return fulfilled.apply(void 0, array);
+    }, rejected);
+};
+
+/**
+ * The async function is a decorator for generator functions, turning
+ * them into asynchronous generators.  Although generators are only part
+ * of the newest ECMAScript 6 drafts, this code does not cause syntax
+ * errors in older engines.  This code should continue to work and will
+ * in fact improve over time as the language improves.
+ *
+ * ES6 generators are currently part of V8 version 3.19 with the
+ * --harmony-generators runtime flag enabled.  SpiderMonkey has had them
+ * for longer, but under an older Python-inspired form.  This function
+ * works on both kinds of generators.
+ *
+ * Decorates a generator function such that:
+ *  - it may yield promises
+ *  - execution will continue when that promise is fulfilled
+ *  - the value of the yield expression will be the fulfilled value
+ *  - it returns a promise for the return value (when the generator
+ *    stops iterating)
+ *  - the decorated function returns a promise for the return value
+ *    of the generator or the first rejected promise among those
+ *    yielded.
+ *  - if an error is thrown in the generator, it propagates through
+ *    every following yield until it is caught, or until it escapes
+ *    the generator function altogether, and is translated into a
+ *    rejection for the promise returned by the decorated generator.
+ */
+Q.async = async;
+function async(makeGenerator) {
+    return function () {
+        // when verb is "send", arg is a value
+        // when verb is "throw", arg is an exception
+        function continuer(verb, arg) {
+            var result;
+            if (hasES6Generators) {
+                try {
+                    result = generator[verb](arg);
+                } catch (exception) {
+                    return reject(exception);
+                }
+                if (result.done) {
+                    return result.value;
+                } else {
+                    return when(result.value, callback, errback);
+                }
+            } else {
+                // FIXME: Remove this case when SM does ES6 generators.
+                try {
+                    result = generator[verb](arg);
+                } catch (exception) {
+                    if (isStopIteration(exception)) {
+                        return exception.value;
+                    } else {
+                        return reject(exception);
+                    }
+                }
+                return when(result, callback, errback);
+            }
+        }
+        var generator = makeGenerator.apply(this, arguments);
+        var callback = continuer.bind(continuer, "next");
+        var errback = continuer.bind(continuer, "throw");
+        return callback();
+    };
+}
+
+/**
+ * The spawn function is a small wrapper around async that immediately
+ * calls the generator and also ends the promise chain, so that any
+ * unhandled errors are thrown instead of forwarded to the error
+ * handler. This is useful because it's extremely common to run
+ * generators at the top-level to work with libraries.
+ */
+Q.spawn = spawn;
+function spawn(makeGenerator) {
+    Q.done(Q.async(makeGenerator)());
+}
+
+// FIXME: Remove this interface once ES6 generators are in SpiderMonkey.
+/**
+ * Throws a ReturnValue exception to stop an asynchronous generator.
+ *
+ * This interface is a stop-gap measure to support generator return
+ * values in older Firefox/SpiderMonkey.  In browsers that support ES6
+ * generators like Chromium 29, just use "return" in your generator
+ * functions.
+ *
+ * @param value the return value for the surrounding generator
+ * @throws ReturnValue exception with the value.
+ * @example
+ * // ES6 style
+ * Q.async(function* () {
+ *      var foo = yield getFooPromise();
+ *      var bar = yield getBarPromise();
+ *      return foo + bar;
+ * })
+ * // Older SpiderMonkey style
+ * Q.async(function () {
+ *      var foo = yield getFooPromise();
+ *      var bar = yield getBarPromise();
+ *      Q.return(foo + bar);
+ * })
+ */
+Q["return"] = _return;
+function _return(value) {
+    throw new QReturnValue(value);
+}
+
+/**
+ * The promised function decorator ensures that any promise arguments
+ * are settled and passed as values (`this` is also settled and passed
+ * as a value).  It will also ensure that the result of a function is
+ * always a promise.
+ *
+ * @example
+ * var add = Q.promised(function (a, b) {
+ *     return a + b;
+ * });
+ * add(Q(a), Q(B));
+ *
+ * @param {function} callback The function to decorate
+ * @returns {function} a function that has been decorated.
+ */
+Q.promised = promised;
+function promised(callback) {
+    return function () {
+        return spread([this, all(arguments)], function (self, args) {
+            return callback.apply(self, args);
+        });
+    };
+}
+
+/**
+ * sends a message to a value in a future turn
+ * @param object* the recipient
+ * @param op the name of the message operation, e.g., "when",
+ * @param args further arguments to be forwarded to the operation
+ * @returns result {Promise} a promise for the result of the operation
+ */
+Q.dispatch = dispatch;
+function dispatch(object, op, args) {
+    return Q(object).dispatch(op, args);
+}
+
+Promise.prototype.dispatch = function (op, args) {
+    var self = this;
+    var deferred = defer();
+    nextTick(function () {
+        self.promiseDispatch(deferred.resolve, op, args);
+    });
+    return deferred.promise;
+};
+
+/**
+ * Gets the value of a property in a future turn.
+ * @param object    promise or immediate reference for target object
+ * @param name      name of property to get
+ * @return promise for the property value
+ */
+Q.get = function (object, key) {
+    return Q(object).dispatch("get", [key]);
+};
+
+Promise.prototype.get = function (key) {
+    return this.dispatch("get", [key]);
+};
+
+/**
+ * Sets the value of a property in a future turn.
+ * @param object    promise or immediate reference for object object
+ * @param name      name of property to set
+ * @param value     new value of property
+ * @return promise for the return value
+ */
+Q.set = function (object, key, value) {
+    return Q(object).dispatch("set", [key, value]);
+};
+
+Promise.prototype.set = function (key, value) {
+    return this.dispatch("set", [key, value]);
+};
+
+/**
+ * Deletes a property in a future turn.
+ * @param object    promise or immediate reference for target object
+ * @param name      name of property to delete
+ * @return promise for the return value
+ */
+Q.del = // XXX legacy
+Q["delete"] = function (object, key) {
+    return Q(object).dispatch("delete", [key]);
+};
+
+Promise.prototype.del = // XXX legacy
+Promise.prototype["delete"] = function (key) {
+    return this.dispatch("delete", [key]);
+};
+
+/**
+ * Invokes a method in a future turn.
+ * @param object    promise or immediate reference for target object
+ * @param name      name of method to invoke
+ * @param value     a value to post, typically an array of
+ *                  invocation arguments for promises that
+ *                  are ultimately backed with `resolve` values,
+ *                  as opposed to those backed with URLs
+ *                  wherein the posted value can be any
+ *                  JSON serializable object.
+ * @return promise for the return value
+ */
+// bound locally because it is used by other methods
+Q.mapply = // XXX As proposed by "Redsandro"
+Q.post = function (object, name, args) {
+    return Q(object).dispatch("post", [name, args]);
+};
+
+Promise.prototype.mapply = // XXX As proposed by "Redsandro"
+Promise.prototype.post = function (name, args) {
+    return this.dispatch("post", [name, args]);
+};
+
+/**
+ * Invokes a method in a future turn.
+ * @param object    promise or immediate reference for target object
+ * @param name      name of method to invoke
+ * @param ...args   array of invocation arguments
+ * @return promise for the return value
+ */
+Q.send = // XXX Mark Miller's proposed parlance
+Q.mcall = // XXX As proposed by "Redsandro"
+Q.invoke = function (object, name /*...args*/) {
+    return Q(object).dispatch("post", [name, array_slice(arguments, 2)]);
+};
+
+Promise.prototype.send = // XXX Mark Miller's proposed parlance
+Promise.prototype.mcall = // XXX As proposed by "Redsandro"
+Promise.prototype.invoke = function (name /*...args*/) {
+    return this.dispatch("post", [name, array_slice(arguments, 1)]);
+};
+
+/**
+ * Applies the promised function in a future turn.
+ * @param object    promise or immediate reference for target function
+ * @param args      array of application arguments
+ */
+Q.fapply = function (object, args) {
+    return Q(object).dispatch("apply", [void 0, args]);
+};
+
+Promise.prototype.fapply = function (args) {
+    return this.dispatch("apply", [void 0, args]);
+};
+
+/**
+ * Calls the promised function in a future turn.
+ * @param object    promise or immediate reference for target function
+ * @param ...args   array of application arguments
+ */
+Q["try"] =
+Q.fcall = function (object /* ...args*/) {
+    return Q(object).dispatch("apply", [void 0, array_slice(arguments, 1)]);
+};
+
+Promise.prototype.fcall = function (/*...args*/) {
+    return this.dispatch("apply", [void 0, array_slice(arguments)]);
+};
+
+/**
+ * Binds the promised function, transforming return values into a fulfilled
+ * promise and thrown errors into a rejected one.
+ * @param object    promise or immediate reference for target function
+ * @param ...args   array of application arguments
+ */
+Q.fbind = function (object /*...args*/) {
+    var promise = Q(object);
+    var args = array_slice(arguments, 1);
+    return function fbound() {
+        return promise.dispatch("apply", [
+            this,
+            args.concat(array_slice(arguments))
+        ]);
+    };
+};
+Promise.prototype.fbind = function (/*...args*/) {
+    var promise = this;
+    var args = array_slice(arguments);
+    return function fbound() {
+        return promise.dispatch("apply", [
+            this,
+            args.concat(array_slice(arguments))
+        ]);
+    };
+};
+
+/**
+ * Requests the names of the owned properties of a promised
+ * object in a future turn.
+ * @param object    promise or immediate reference for target object
+ * @return promise for the keys of the eventually settled object
+ */
+Q.keys = function (object) {
+    return Q(object).dispatch("keys", []);
+};
+
+Promise.prototype.keys = function () {
+    return this.dispatch("keys", []);
+};
+
+/**
+ * Turns an array of promises into a promise for an array.  If any of
+ * the promises gets rejected, the whole array is rejected immediately.
+ * @param {Array*} an array (or promise for an array) of values (or
+ * promises for values)
+ * @returns a promise for an array of the corresponding values
+ */
+// By Mark Miller
+// http://wiki.ecmascript.org/doku.php?id=strawman:concurrency&rev=1308776521#allfulfilled
+Q.all = all;
+function all(promises) {
+    return when(promises, function (promises) {
+        var countDown = 0;
+        var deferred = defer();
+        array_reduce(promises, function (undefined, promise, index) {
+            var snapshot;
+            if (
+                isPromise(promise) &&
+                (snapshot = promise.inspect()).state === "fulfilled"
+            ) {
+                promises[index] = snapshot.value;
+            } else {
+                ++countDown;
+                when(
+                    promise,
+                    function (value) {
+                        promises[index] = value;
+                        if (--countDown === 0) {
+                            deferred.resolve(promises);
+                        }
+                    },
+                    deferred.reject,
+                    function (progress) {
+                        deferred.notify({ index: index, value: progress });
+                    }
+                );
+            }
+        }, void 0);
+        if (countDown === 0) {
+            deferred.resolve(promises);
+        }
+        return deferred.promise;
+    });
+}
+
+Promise.prototype.all = function () {
+    return all(this);
+};
+
+/**
+ * Waits for all promises to be settled, either fulfilled or
+ * rejected.  This is distinct from `all` since that would stop
+ * waiting at the first rejection.  The promise returned by
+ * `allResolved` will never be rejected.
+ * @param promises a promise for an array (or an array) of promises
+ * (or values)
+ * @return a promise for an array of promises
+ */
+Q.allResolved = deprecate(allResolved, "allResolved", "allSettled");
+function allResolved(promises) {
+    return when(promises, function (promises) {
+        promises = array_map(promises, Q);
+        return when(all(array_map(promises, function (promise) {
+            return when(promise, noop, noop);
+        })), function () {
+            return promises;
+        });
+    });
+}
+
+Promise.prototype.allResolved = function () {
+    return allResolved(this);
+};
+
+/**
+ * @see Promise#allSettled
+ */
+Q.allSettled = allSettled;
+function allSettled(promises) {
+    return Q(promises).allSettled();
+}
+
+/**
+ * Turns an array of promises into a promise for an array of their states (as
+ * returned by `inspect`) when they have all settled.
+ * @param {Array[Any*]} values an array (or promise for an array) of values (or
+ * promises for values)
+ * @returns {Array[State]} an array of states for the respective values.
+ */
+Promise.prototype.allSettled = function () {
+    return this.then(function (promises) {
+        return all(array_map(promises, function (promise) {
+            promise = Q(promise);
+            function regardless() {
+                return promise.inspect();
+            }
+            return promise.then(regardless, regardless);
+        }));
+    });
+};
+
+/**
+ * Captures the failure of a promise, giving an oportunity to recover
+ * with a callback.  If the given promise is fulfilled, the returned
+ * promise is fulfilled.
+ * @param {Any*} promise for something
+ * @param {Function} callback to fulfill the returned promise if the
+ * given promise is rejected
+ * @returns a promise for the return value of the callback
+ */
+Q.fail = // XXX legacy
+Q["catch"] = function (object, rejected) {
+    return Q(object).then(void 0, rejected);
+};
+
+Promise.prototype.fail = // XXX legacy
+Promise.prototype["catch"] = function (rejected) {
+    return this.then(void 0, rejected);
+};
+
+/**
+ * Attaches a listener that can respond to progress notifications from a
+ * promise's originating deferred. This listener receives the exact arguments
+ * passed to ``deferred.notify``.
+ * @param {Any*} promise for something
+ * @param {Function} callback to receive any progress notifications
+ * @returns the given promise, unchanged
+ */
+Q.progress = progress;
+function progress(object, progressed) {
+    return Q(object).then(void 0, void 0, progressed);
+}
+
+Promise.prototype.progress = function (progressed) {
+    return this.then(void 0, void 0, progressed);
+};
+
+/**
+ * Provides an opportunity to observe the settling of a promise,
+ * regardless of whether the promise is fulfilled or rejected.  Forwards
+ * the resolution to the returned promise when the callback is done.
+ * The callback can return a promise to defer completion.
+ * @param {Any*} promise
+ * @param {Function} callback to observe the resolution of the given
+ * promise, takes no arguments.
+ * @returns a promise for the resolution of the given promise when
+ * ``fin`` is done.
+ */
+Q.fin = // XXX legacy
+Q["finally"] = function (object, callback) {
+    return Q(object)["finally"](callback);
+};
+
+Promise.prototype.fin = // XXX legacy
+Promise.prototype["finally"] = function (callback) {
+    callback = Q(callback);
+    return this.then(function (value) {
+        return callback.fcall().then(function () {
+            return value;
+        });
+    }, function (reason) {
+        // TODO attempt to recycle the rejection with "this".
+        return callback.fcall().then(function () {
+            throw reason;
+        });
+    });
+};
+
+/**
+ * Terminates a chain of promises, forcing rejections to be
+ * thrown as exceptions.
+ * @param {Any*} promise at the end of a chain of promises
+ * @returns nothing
+ */
+Q.done = function (object, fulfilled, rejected, progress) {
+    return Q(object).done(fulfilled, rejected, progress);
+};
+
+Promise.prototype.done = function (fulfilled, rejected, progress) {
+    var onUnhandledError = function (error) {
+        // forward to a future turn so that ``when``
+        // does not catch it and turn it into a rejection.
+        nextTick(function () {
+            makeStackTraceLong(error, promise);
+            if (Q.onerror) {
+                Q.onerror(error);
+            } else {
+                throw error;
+            }
+        });
+    };
+
+    // Avoid unnecessary `nextTick`ing via an unnecessary `when`.
+    var promise = fulfilled || rejected || progress ?
+        this.then(fulfilled, rejected, progress) :
+        this;
+
+    if (typeof process === "object" && process && process.domain) {
+        onUnhandledError = process.domain.bind(onUnhandledError);
+    }
+
+    promise.then(void 0, onUnhandledError);
+};
+
+/**
+ * Causes a promise to be rejected if it does not get fulfilled before
+ * some milliseconds time out.
+ * @param {Any*} promise
+ * @param {Number} milliseconds timeout
+ * @param {String} custom error message (optional)
+ * @returns a promise for the resolution of the given promise if it is
+ * fulfilled before the timeout, otherwise rejected.
+ */
+Q.timeout = function (object, ms, message) {
+    return Q(object).timeout(ms, message);
+};
+
+Promise.prototype.timeout = function (ms, message) {
+    var deferred = defer();
+    var timeoutId = setTimeout(function () {
+        deferred.reject(new Error(message || "Timed out after " + ms + " ms"));
+    }, ms);
+
+    this.then(function (value) {
+        clearTimeout(timeoutId);
+        deferred.resolve(value);
+    }, function (exception) {
+        clearTimeout(timeoutId);
+        deferred.reject(exception);
+    }, deferred.notify);
+
+    return deferred.promise;
+};
+
+/**
+ * Returns a promise for the given value (or promised value), some
+ * milliseconds after it resolved. Passes rejections immediately.
+ * @param {Any*} promise
+ * @param {Number} milliseconds
+ * @returns a promise for the resolution of the given promise after milliseconds
+ * time has elapsed since the resolution of the given promise.
+ * If the given promise rejects, that is passed immediately.
+ */
+Q.delay = function (object, timeout) {
+    if (timeout === void 0) {
+        timeout = object;
+        object = void 0;
+    }
+    return Q(object).delay(timeout);
+};
+
+Promise.prototype.delay = function (timeout) {
+    return this.then(function (value) {
+        var deferred = defer();
+        setTimeout(function () {
+            deferred.resolve(value);
+        }, timeout);
+        return deferred.promise;
+    });
+};
+
+/**
+ * Passes a continuation to a Node function, which is called with the given
+ * arguments provided as an array, and returns a promise.
+ *
+ *      Q.nfapply(FS.readFile, [__filename])
+ *      .then(function (content) {
+ *      })
+ *
+ */
+Q.nfapply = function (callback, args) {
+    return Q(callback).nfapply(args);
+};
+
+Promise.prototype.nfapply = function (args) {
+    var deferred = defer();
+    var nodeArgs = array_slice(args);
+    nodeArgs.push(deferred.makeNodeResolver());
+    this.fapply(nodeArgs).fail(deferred.reject);
+    return deferred.promise;
+};
+
+/**
+ * Passes a continuation to a Node function, which is called with the given
+ * arguments provided individually, and returns a promise.
+ * @example
+ * Q.nfcall(FS.readFile, __filename)
+ * .then(function (content) {
+ * })
+ *
+ */
+Q.nfcall = function (callback /*...args*/) {
+    var args = array_slice(arguments, 1);
+    return Q(callback).nfapply(args);
+};
+
+Promise.prototype.nfcall = function (/*...args*/) {
+    var nodeArgs = array_slice(arguments);
+    var deferred = defer();
+    nodeArgs.push(deferred.makeNodeResolver());
+    this.fapply(nodeArgs).fail(deferred.reject);
+    return deferred.promise;
+};
+
+/**
+ * Wraps a NodeJS continuation passing function and returns an equivalent
+ * version that returns a promise.
+ * @example
+ * Q.nfbind(FS.readFile, __filename)("utf-8")
+ * .then(console.log)
+ * .done()
+ */
+Q.nfbind =
+Q.denodeify = function (callback /*...args*/) {
+    var baseArgs = array_slice(arguments, 1);
+    return function () {
+        var nodeArgs = baseArgs.concat(array_slice(arguments));
+        var deferred = defer();
+        nodeArgs.push(deferred.makeNodeResolver());
+        Q(callback).fapply(nodeArgs).fail(deferred.reject);
+        return deferred.promise;
+    };
+};
+
+Promise.prototype.nfbind =
+Promise.prototype.denodeify = function (/*...args*/) {
+    var args = array_slice(arguments);
+    args.unshift(this);
+    return Q.denodeify.apply(void 0, args);
+};
+
+Q.nbind = function (callback, thisp /*...args*/) {
+    var baseArgs = array_slice(arguments, 2);
+    return function () {
+        var nodeArgs = baseArgs.concat(array_slice(arguments));
+        var deferred = defer();
+        nodeArgs.push(deferred.makeNodeResolver());
+        function bound() {
+            return callback.apply(thisp, arguments);
+        }
+        Q(bound).fapply(nodeArgs).fail(deferred.reject);
+        return deferred.promise;
+    };
+};
+
+Promise.prototype.nbind = function (/*thisp, ...args*/) {
+    var args = array_slice(arguments, 0);
+    args.unshift(this);
+    return Q.nbind.apply(void 0, args);
+};
+
+/**
+ * Calls a method of a Node-style object that accepts a Node-style
+ * callback with a given array of arguments, plus a provided callback.
+ * @param object an object that has the named method
+ * @param {String} name name of the method of object
+ * @param {Array} args arguments to pass to the method; the callback
+ * will be provided by Q and appended to these arguments.
+ * @returns a promise for the value or error
+ */
+Q.nmapply = // XXX As proposed by "Redsandro"
+Q.npost = function (object, name, args) {
+    return Q(object).npost(name, args);
+};
+
+Promise.prototype.nmapply = // XXX As proposed by "Redsandro"
+Promise.prototype.npost = function (name, args) {
+    var nodeArgs = array_slice(args || []);
+    var deferred = defer();
+    nodeArgs.push(deferred.makeNodeResolver());
+    this.dispatch("post", [name, nodeArgs]).fail(deferred.reject);
+    return deferred.promise;
+};
+
+/**
+ * Calls a method of a Node-style object that accepts a Node-style
+ * callback, forwarding the given variadic arguments, plus a provided
+ * callback argument.
+ * @param object an object that has the named method
+ * @param {String} name name of the method of object
+ * @param ...args arguments to pass to the method; the callback will
+ * be provided by Q and appended to these arguments.
+ * @returns a promise for the value or error
+ */
+Q.nsend = // XXX Based on Mark Miller's proposed "send"
+Q.nmcall = // XXX Based on "Redsandro's" proposal
+Q.ninvoke = function (object, name /*...args*/) {
+    var nodeArgs = array_slice(arguments, 2);
+    var deferred = defer();
+    nodeArgs.push(deferred.makeNodeResolver());
+    Q(object).dispatch("post", [name, nodeArgs]).fail(deferred.reject);
+    return deferred.promise;
+};
+
+Promise.prototype.nsend = // XXX Based on Mark Miller's proposed "send"
+Promise.prototype.nmcall = // XXX Based on "Redsandro's" proposal
+Promise.prototype.ninvoke = function (name /*...args*/) {
+    var nodeArgs = array_slice(arguments, 1);
+    var deferred = defer();
+    nodeArgs.push(deferred.makeNodeResolver());
+    this.dispatch("post", [name, nodeArgs]).fail(deferred.reject);
+    return deferred.promise;
+};
+
+/**
+ * If a function would like to support both Node continuation-passing-style and
+ * promise-returning-style, it can end its internal promise chain with
+ * `nodeify(nodeback)`, forwarding the optional nodeback argument.  If the user
+ * elects to use a nodeback, the result will be sent there.  If they do not
+ * pass a nodeback, they will receive the result promise.
+ * @param object a result (or a promise for a result)
+ * @param {Function} nodeback a Node.js-style callback
+ * @returns either the promise or nothing
+ */
+Q.nodeify = nodeify;
+function nodeify(object, nodeback) {
+    return Q(object).nodeify(nodeback);
+}
+
+Promise.prototype.nodeify = function (nodeback) {
+    if (nodeback) {
+        this.then(function (value) {
+            nextTick(function () {
+                nodeback(null, value);
+            });
+        }, function (error) {
+            nextTick(function () {
+                nodeback(error);
+            });
+        });
+    } else {
+        return this;
+    }
+};
+
+// All code before this point will be filtered from stack traces.
+var qEndingLine = captureLine();
+
+return Q;
+
+}/** Angoose Client for Node.js */
+
+(function(){
+    if(typeof exports =="undefined" || typeof require == 'undefined') return;
+    console.log("##### Angoose node client Loading");
+    var Q  = require("q");
+    AngooseClient.init({
+        //http: realHttp(),
+        http:mockHttp(),
+        promise:Q
+    });
+    
+    function realHttp(){
+        var request = require('request');
+        var _ = require("underscore")
+        var HTTP_BASE =  "http://localhost:9988"; // +( AngooseClient.configs.httpPort ?(":"+ AngooseClient.config.httpPort):"");
+        var $httpDelegate = {}
+        var methods = ['get', 'post','put','delete'];
+        // create deletage functions over request module
+        var createFunc = function(method){
+            return function(url, data, callback){
+                console.log("Sending thtp request", url)
+                var options = {url:  HTTP_BASE + url, method:method, jar:true , json:true};
+                if(data && typeof(data) != 'function' ) 
+                    options.json = data;
+                else{
+                    callback = data;
+                } 
+                var deferred = Q.defer();
+                request(options, function(err, res, body){
+                    if(err) 
+                        deferred.reject(new Error(err));
+                    else
+                        deferred.resolve(body);
+                    if(callback) callback(err, body);
+                });
+                return deferred.promise;
+            }
+        }
+        _.each(methods, function(method){
+            $httpDelegate[method] = createFunc(method);
+        })
+        return $httpDelegate;
+           
+    }
+    function mockHttp(){
+        var httpMock = require("node-mocks-http");
+        var mock = {};
+        var session = {};
+        mock.post = function(url, data){
+            var deferred = Q.defer();
+            
+            var request= httpMock.createRequest({
+                    url: url,
+                    method:'POST',
+                    params: {
+                        method: data.method,
+                        model: data.clazz
+                    }, 
+                    session:session
+            });
+            request.body = data;
+            var mockUser = {
+                    _id: '52c44dd0ecafbf1a9a000002',
+                    username:'Gaelyn',
+                    email:'gaelyn@demo.com',
+                    roles:'admin',
+                    type:'admin'
+               }
+            // /** session */
+           // request.session = {
+               // user: mockUser,
+               // userObj: mockUser
+           // }
+           var response = httpMock.createResponse();
+           response.send = function(code, data){
+               data = JSON.parse( JSON.stringify(data) );
+               deferred.resolve(data);
+           }
+           var ROOT = process.cwd();
+           var angoose = null;
+           if(require("fs").existsSync(ROOT+"/lib/angoose.js"))
+                angoose = require(ROOT+"/lib/angoose");
+           else {
+                angoose = require("angoose");
+           }
+               
+           
+           angoose.rmiAccept(request, response);
+           return deferred.promise;
+        }
+        return mock    
+    }
+
+    module.exports = AngooseClient;         
+})()
+
+
+/******* angoose-ui filename: /home/enzo/Documenti/SII/angoose-demo.git/node_modules/angoose/extensions/angoose-ui/angular-modules.js   *******/
+AngooseClient.logger.info("Loading angoose-forms extension");
+angular.module('angoose.ui',['angoose.client',
+                'angoose.ui.services', 
+                'angoose.ui.directives', 
+                'angoose.ui.controllers', 
+                'angoose.ui.templates', 
+                'angoose.ui.filters', 
+                'fake']);
+
+angular.module('angoose.ui.services', []);
+angular.module('angoose.ui.directives', ['angoose.ui.services']);
+angular.module('angoose.ui.controllers', ['angoose.ui.services']);
+angular.module('angoose.ui.filters', ['angoose.ui.services']);
+angular.module('angoose.ui.templates', ['angoose.ui.services']);
+
+// udnerscore
+angular.module('fake', []).factory('MessageBox', function(){
+    function noop(msg,cb){console.log("MessageBox", arguments); cb && cb() };
+    return {
+        error: noop, success:noop,warn:noop, confirm:noop
+    }
+});
+  
+
+/******* angoose-ui filename: services/alerts.js   *******/
+angular.module('angoose.ui.services').provider("$alert", function(){
+     this.$get = function($rootScope){
+            var Alert = {};
+            var scope = $rootScope;
+            var alerts = scope.alerts = [];
+            function add(alert, delay){
+                delay = delay || 1;
+                setTimeout(function(){
+                    // doing this outside angular context
+                    var existing = null;
+                    for(var i in alerts){
+                        var item = alerts[i];
+                        if(item.type == alert.type && item.msg == alert.msg ){
+                            existing = item; 
+                            break;
+                        }
+                    }
+                    if(!existing){
+                        alerts.push(alert);
+                        scope.$digest();
+                    }
+                }, delay);
+            }
+            Alert.info = function(msg, delay){
+                add({type:'info', msg: msg});
+            };
+            Alert.warn = function(msg, delay){
+                add({type:'warn', msg: msg}, delay);
+            };
+            Alert.success = function(msg, delay){
+                add({type:'success', msg: msg}, delay);
+            }
+            Alert.error = function(msg, delay){
+                //msg = _formatError(msg);
+                add({type:'error', msg: msg}, delay);
+            }
+            Alert.clear = function(){
+                setTimeout(function(){
+                     alerts.length = 0;
+                     scope.$digest();    
+                })
+                
+            }
+            scope.removeAlert  = function($index){
+                 if(alerts[$index]){
+                     setTimeout(function(){
+                        alerts.splice($index,1);
+                        scope.$digest();     
+                     })
+                 }
+            }
+            return Alert;
+        }
+ });
+    
+
+
+
+/******* angoose-ui filename: services/ui-form.js   *******/
+;(function(){
+
+
+angular.module('angoose.ui.services').factory('AngooseForm',function(  angoose, $q, $timeout){
+    
+    function AngooseForm(scope){
+        angoose.logger.trace("Created form object for scope", scope.$id);
+        this.scope = scope;
+        scope.$form = this;
+    }
+    // update the spec with new options.
+    // new options will override the existing ones
+    AngooseForm.prototype.update = function(options){
+        angoose.logger.trace("Updating form spec", options);
+        options = options || {};
+        angular.extend(this, options);
+        // this.modelName = options.modelName || this.modelName
+        // this.pageTitle = options.pageTitle || this.pageTitle;
+        // this.template = options.template || this.template;
+        // this.modelId = options.modelId || this.modelId;
+        return this;
+    }
+    AngooseForm.prototype.get =   getter;
+    return AngooseForm;
+});  
+             
+
+function getter(obj, p){
+    if(!p || !obj) return undefined;
+    var p = p.split('.');
+    var o = obj;
+    for (var i = 0; i < p.length; i++){
+        if(!o || typeof o != "object") return undefined;
+        o = o[p[i]]
+    } 
+    return o;
+}    
+
+})();
+
+
+/******* angoose-ui filename: services/ui-query.js   *******/
+;(function(){
+
+
+angular.module('angoose.ui.services').factory('AngooseQuery',function(angoose,  $q, $timeout){
+    
+    function AngooseQuery(scope){
+        angoose.logger.trace("Created Query object for scope", scope.$id);
+        this.scope = scope;
+        scope.dmeta = this;
+        // some initial structure
+        this.spec = { filter: {}}
+    }
+    // update the spec with new options.
+    // new options will override the existing ones
+    AngooseQuery.prototype.update = function(options){
+        angoose.logger.trace("Updating Query spec", options);
+        if(!options) return;
+        //@todo: below is a mess
+        var dmeta = this;
+        dmeta.modelName = options.modelName || dmeta.modelName
+        dmeta.columns = options.columns || dmeta.columns;
+        dmeta.render = options.render || dmeta.render;
+        
+        
+        if(options.preset)
+            dmeta.spec.preset = options.preset || dmeta.spec.preset;
+        if(options.defaultFilter)
+            dmeta.spec.preset = options.defaultFilter || dmeta.spec.preset;
+        
+        dmeta.spec.sortBy = options.sortBy || dmeta.sortBy 
+        dmeta.spec.sortDir = options.sortDir || dmeta.sortDir
+        
+        dmeta.templates = options.templates || dmeta.templates;
+        dmeta.template = options.template || dmeta.template;
+        dmeta.templateUrl = options.templateUrl || dmeta.templateUrl;
+        
+        dmeta.pageTitle = options.pageTitle || dmeta.pageTitle;
+        dmeta.actionColumn = options.actionColumn ===undefined?  dmeta.actionColumn :options.actionColumn   ;
+         
+        return this;
+    }
+    AngooseQuery.prototype.get =   getter;
+    return AngooseQuery;
+});  
+             
+
+function getter(obj, p){
+    if(!p || !obj) return undefined;
+    var p = p.split('.');
+    var o = obj;
+    for (var i = 0; i < p.length; i++){
+        if(!o || typeof o != "object") return undefined;
+        o = o[p[i]]
+    } 
+    return o;
+}    
+
+})();
+
+
+/******* angoose-ui filename: services/ui-routes.js   *******/
+;angular.module('angoose.ui.services').config(['$routeProvider', function($routeProvider ) {
+    AngooseClient.logger.debug("Configuring angoose forms routes", AngooseClient.config('url-prefix'));
+    
+    var prefix = '/deform';
+    
+    function addRoutes(prefix){
+        AngooseClient.logger.debug("adding routes for prefix", prefix);
+        $routeProvider.
+        when(prefix+"/:modelName/list-:customController", {template: resolveTemplate('list')}).
+        when(prefix+"/:modelName/list", {template: resolveTemplate('list')}).
+        when(prefix+"/:modelName/create", {template:resolveTemplate('edit')}).
+        when(prefix+"/:modelName/update/:modelId", {template:resolveTemplate('edit')}).
+        when(prefix+"/:modelName/edit/:modelId", {template:resolveTemplate('edit')}).
+        when(prefix+"/:modelName/view/:modelId", {template:resolveTemplate('view')});
+        
+        // list/create
+        $routeProvider.when(prefix+"/:modelName/list/:customCtrl", {template: fn('list') });
+        $routeProvider.when(prefix+"/:modelName/create/:customCtrl", {template: fn('create')});
+        $routeProvider.when(prefix+"/:modelName/update/:customCtrl/:modelId", {template: fn('edit')}); 
+        $routeProvider.when(prefix+"/:modelName/edit/:customCtrl/:modelId", {template: fn('edit')});
+        $routeProvider.when(prefix+"/:modelName/view/:customCtrl/:modelId", {template: fn('view')});
+    
+    }
+    addRoutes('/deform'); // deprecated
+    addRoutes('/angoose');
+    if('/angoose' !== AngooseClient.config('url-prefix'))
+        addRoutes(AngooseClient.config('url-prefix'));
+        
+    function fn(actionType){
+        return function customResolve(params){
+            var ctrl =decamelcase(params.modelName) +"-" +actionType+"-"+ params.customCtrl;
+            return resolveTemplate(actionType, ctrl);
+        }   
+    }
+
+    function resolveTemplate(name, customCtrl){
+        //console.log("---------------- Resolving template for ",name)
+        
+        var tmpName  = "deform."+ name+".tpl"
+        var contents =  $angooseTemplateCache(tmpName);
+        name = 'create' == name ? 'edit':name;
+        contents = "<div ang-" + name+   (customCtrl? " ng-controller='" + customCtrl+"'": "") +">"  + contents+ "</div>";
+        return contents;
+    }
+    
+    function decamelcase (name){
+        // convert ClientUser to client-user 
+        if(!name) return name;
+        var ret = "";
+        for(var i=0;i<name.length;i++){
+            var c = name.charAt(i);
+            if(c.toLowerCase() != c && ret.length>0) ret+="-"
+            ret += c;
+        }
+        return ret.toLowerCase();
+    }
+}]);
+
+/******* angoose-ui filename: services/ui-service.js   *******/
+;(function(){
+    
+var serviceProvider = function () {
+    var uiOptions ={
+        '$query-error': 'throw'  // throw | alert | none, used to specify what happens when there is error loading data
+    };
+    var service = {
+            getReference: getRef,
+            getPathSchema:getPathSchema,
+            debounce:debounce,
+            //initQuery:initQuery,
+            //defineQuery:initQuery,
+            isCustomRef:isCustomRef,
+            camelcase:camelcase,
+            decamelcase:decamelcase,
+            extractTemplate:extractTemplate,
+            getter:getter,
+            setter:setter,
+            getCustomRefKeyfieldPath:getCustomRefKeyfieldPath,
+            getCustomRefValue:getCustomRefValue,
+            filterPath:filterPath,
+            resolveAttribute: resolveAttribute
+    }
+    this.$get = function ($http, $templateCache, $q,$compile,  AngooseForm, AngooseQuery, angoose) {
+            service.loadFieldTemplate = function(fieldTemplate){
+                fieldTemplate = fieldTemplate.replace(".html", "");
+                fieldTemplate = 'deform.field.' + fieldTemplate+".tpl";
+                return this.loadTemplate( fieldTemplate);
+            }
+            service.loadTemplate = function(templateName){
+                angoose.logger.trace("Loading template", templateName)
+                var deferred = $q.defer();
+                var html = $angooseTemplateCache(templateName);
+                if(html){
+                    deferred.resolve( angular.element(html));
+                    return deferred.promise;
+                }
+                angoose.logger.trace("$http loading template", templateName);
+                return $http.get(templateName, {cache:  $templateCache }).then(function(response) {
+                    //console.log(response.data, "got template $http")
+                  return angular.element(response.data);
+                }, function(response) {
+                  throw new Error('Template not found: ' + templateName);
+                  //console && console.error("teamplte note found", templateName)
+                });
+            };
+            // service.resolveTemplateUrl = function(templateName){
+                // var templateUrl = deformOptions.templateDir +"/"+ templateName +".tpl.html";
+                // return templateUrl;
+            // }
+            service.defineForm = function($scope, options){
+                //@todo: use auto merge/extend
+                var formSpec =  $scope.$form;
+                if(!formSpec)  
+                    formSpec = new AngooseForm($scope);
+                formSpec.update(options);
+                return formSpec;
+            };
+            service.initQuery = service.defineQuery = function($scope, options){
+                //@todo: use auto merge/extend
+                var querySpec =  $scope.dmeta;
+                if(!querySpec)  
+                    querySpec = new AngooseQuery($scope);
+                querySpec.update(options);
+                return querySpec;
+            };
+            
+            service.resolveTemplate = function resolveTemplate($element, $attrs, config, defaultTemplateUrl){
+                // templateUrl could be specified in the directive <ang-edit template-url='xxx' template='xxx'>
+                 /** template resolving order
+                 //todo: consolidate with field directive template
+                 
+                 1)  config.template  // config is from custom controller, if available
+                 2)  config.templateUrl
+                 3)  $attrs.templateUrl
+                 4)   inline template
+                 */
+                var inline = $element.html();
+                var template = config && config['template'];
+                var url = config && config['templateUrl'];
+                url = url || $attrs.templateUrl;
+                
+                var deferred = $q.defer();
+                
+                if(url || template) inline = "";  // ignore inline template if template/templateUrl is specified
+                
+                if(!inline && !template && !url){
+                    // no template specified anywhere, use the default
+                    angoose.logger.trace("Using default template", defaultTemplateUrl);
+                    url = defaultTemplateUrl;
+                }
+                var em = ''; 
+                if(template){
+                    // template is specified as string content
+                    angoose.logger.trace("Compiling template content");
+                    em = angular.element(template);
+                }
+                else if(url){
+                    // second order
+                    console.log("loadTemplate", url);
+                    return  service.loadTemplate(url);
+                }
+                else{
+                    // inline doesn't need special handling
+                    angoose.logger.trace("Did not find configured template, using inline template" );
+                    em = "";
+                }   
+                deferred.resolve(em); // nextTick?
+                return deferred.promise;
+            };
+            service.resolveAndCompile = function($scope, $element, $attrs, config, defaultTemplate){
+                angoose.logger.trace("Resolving template[default: ", defaultTemplate+"]");
+                service.resolveTemplate($element, $attrs, config, defaultTemplate).then(function(em){
+                    angoose.logger.trace("resolveTemplate completed[default: ", defaultTemplate+"]. Got content: ", !!em);
+                    if(em){
+                        $element.html("<!-- CLEARED -->"); // first clear the inline template
+                        $element.append(em);
+                        $compile(em)($scope);
+                    }
+                }, function(err){
+                    console.error("Error resolving template(list.tpl)", err);
+                });
+            }
+            return service;  
+    };
+    this.config = function(name, val){
+        if(typeof(name) === 'object')
+            uiOptions = angular.extend(uiOptions, opts)
+        else if(name){
+            if( val === undefined) return getter(uiOptions, name);
+            setter(uiOptions, name, val)    
+        }
+    };
+    
+    
+    
+    
+};    
+    
+angular.module('angoose.ui.services').provider('$ui', serviceProvider).provider('$deform', serviceProvider).run(['$ui','$rootScope', function($ui, $rootScope){
+    $rootScope.defineQuery = function(meta){
+        return $ui.defineQuery(this, meta);
+    };
+    $rootScope.defineForm = function(meta){
+        return $ui.defineForm(this, meta);
+    }  
+}]);
+ 
+
+
+// a helper function to determine the attribute value based on following order:
+//  $scope (from custom controller) -> $routeParam -> directive 
+function resolveAttribute(name, $scope, $routeParams, $attrs ){
+    return getter($scope.dmeta ? $scope.dmeta: $scope.$form,  name) ||  getter($routeParams, name) ||  $attrs[name];
+}
+function filterPath(path, data, schema){
+    
+    if(data.options.editable === false) return true;
+    if(schema && schema.options && schema.options.discriminatorKey == path) return true;
+    if(path.indexOf("-")>0 || path == 'type') return true; /** cannot handle hyphen */
+    
+    if(getter(data, "schema.options.editable") === false) {
+        return true
+    }
+    return false;
+}
+function setter(doc, path, val){
+    if(!path || !doc ) return;
+     var   pieces = path.split('.');
+      var obj = doc;
+      for (var i = 0, len = pieces.length; i < len; i++) {
+          if(i+1  == len ) // last one
+          {
+              obj[ pieces[i]] = val;
+              return;
+          }
+          obj[pieces[i]] = obj[pieces[i]] || {};
+          obj = obj[pieces[i]] || {};
+      }
+}    
+function getter(obj, p){
+    if(!p || !obj) return undefined;
+    var p = p.split('.');
+    var o = obj;
+    for (var i = 0; i < p.length; i++){
+        if(!o || typeof o != "object") return undefined;
+        o = o[p[i]]
+    } 
+    return o;
+}      
+function getRef(pathSchema){
+    var opts = pathSchema.options;
+    
+    /** Mongoose, array of ObjectIDs */
+    if( Array.isArray(opts.type) && opts.type.length>0  &&  opts.type[0] && opts.type[0].ref ) 
+        return opts.type[0].ref;
+    /** Single ObjectID Reference*/
+    if(pathSchema.instance == 'ObjectID' && opts.ref) return opts.ref;
+    
+    
+    if(pathSchema.options.ref && pathSchema.instance == 'CustomRef'){
+        /** deform custom ref*/
+       return pathSchema.options.ref;    
+    }
+    /** deform rich reference, array */
+    if(Array.isArray(opts.type ) && pathSchema.caster && 
+            pathSchema.caster.instance == 'CustomRef' && pathSchema.caster.options.ref ){ 
+        return pathSchema.caster.options.ref;
+    }
+        
+    return null;
+} 
+function isCustomRef(pathSchema){
+    return pathSchema && (pathSchema.instance == 'CustomRef' || (pathSchema.caster && pathSchema.caster.instance == 'CustomRef'));
+}
+
+function getCustomRefKeyfieldPath(pathSchema){
+    if(!isCustomRef(pathSchema)) return undefined;
+    return pathSchema.path +"." + (getter(pathSchema, 'options.keyField') || 'name');
+}
+function getCustomRefValue(instance, pathSchema){
+    var path = getCustomRefKeyfieldPath(pathSchema);
+    if(!path) return undefined;
+    var name = getter(instance, path);
+    if(path.indexOf("sortable")>=0) 
+        return formatSortable(name);
+    if(name && (name.first || name.last)) name =( name.first || "")+" "+ (name.last || ""); 
+    return name;
+}
+
+function camelcase(name){
+    // converting client-user to ClientUser 
+    if(!name) return name;
+    var parts = name.split("-");
+    name = "";
+    for(var i=0;i< parts.length;i++){
+        if(parts[i] && parts[i].length>0) name+= parts[i].substring(0,1).toUpperCase() + parts[i].substring(1);
+    }
+    return name;
+}
+function decamelcase(name){
+    // convert ClientUser to client-user 
+    if(!name) return name;
+    var ret = "";
+    for(var i=0;i<name.length;i++){
+        var c = name.charAt(i);
+        if(c.toLowerCase() != c && ret.length>0) ret+="-"
+        ret += c;
+    }
+    return ret.toLowerCase();
+}
+function trim(str){
+    return str? str.replace(/^\s*(.*?)\s*$/, "$1"): str;
+}
+function formatSortable(sortable){
+    if(!sortable || typeof(sortable)!=='string') return sortable;
+    sortable = trim(sortable.toLowerCase()).replace(/null/i, '');
+    var parts = sortable.split(",");
+    if(parts.length != 2)
+        parts = sortable.split(" ");
+    if(parts.length >1){
+        return  camelcase(trim(parts[1])) +" "+ camelcase( trim(parts[0]));
+    }
+    return sortable;
+}
+ 
+function getPathSchema(modelClass, path){
+    var modelSchema = modelClass.schema;
+    return modelSchema.paths && modelSchema.paths[path];
+}
+
+
+/**
+ * Debounces a function. Returns a function that calls the original fn function only if no invocations have been made
+ * within the last quietMillis milliseconds.
+ *
+ * @param quietMillis number of milliseconds to wait before invoking fn
+ * @param fn function to be debounced
+ * @param ctx object to be used as this reference within fn
+ * @return debounced version of fn
+ */
+function debounce(quietMillis, fn, ctx ) {
+    ctx = ctx || undefined;
+    var timeout;
+    return function () {
+        var args = arguments;
+        clearTimeout(timeout);
+        timeout = setTimeout(function() {
+            fn.apply(ctx, args);
+        }, quietMillis);
+    };
+}
+
+
+
+function extractTemplate(f){
+      return f.toString().
+          replace(/^[^\/]+\/\*!?/, '').
+          replace(/\*\/[^\/]+$/, '');
+}
+
+
+})();
+
+
+/******* angoose-ui filename: controllers/datepicker.js   *******/
+/**
+ * Deform field directives
+ *  
+ * 
+ * Usage:
+ * 
+ * 
+ */
+(function(){
+    
+ 
+angular.module('angoose.ui.controllers').controller("dfc-datepicker", function($scope, $ui, $injector, $schema, $filter, $timeout, $modal ){
+        enterscope($scope, "Datepicker "+ $scope.path);
+        $scope.showTimepicker = $ui.getter( $schema, 'options.timepicker') !== false;
+        $scope.openPicker = function(){
+            $modal.open({
+                template: $("#datepicker-template-"+$scope.$id).html(),
+                scope: $scope,
+                backdrop:'static'
+            })    
+        };
+}).controller("dfControllerDatepickerModal", function($scope, $injector ,  $timeout ){
+        enterscope($scope, "date picker modal");
+        mydate  = $scope.$field.$viewValue; 
+        if(typeof(mydate ) == 'string') mydate = new Date(mydate);
+        $timeout(function(){
+            
+            var datepickerId =  "#datepicker"+$scope.$id;
+            var picker = angular.element(datepickerId);
+            picker.datepicker({
+                onRender: function(date) {
+                    return  '';
+                }
+            }).on('changeDate', function(ev) {
+               $scope.holding = getDate($scope.holding, ev);
+            });
+            
+            
+            if($scope.showTimepicker){
+                    var timepicker = angular.element("#timepicker"+$scope.$id);
+                    timepicker.timepicker({
+                        minuteStep: 5
+                    }).on('changeTime.timepicker', function(e) {
+                      $scope.holding = getDate($scope.holding, e);
+                    });    
+            }
+            mydate  && picker.datepicker("setValue", ("00" + (mydate.getMonth() + 1)).slice(-2) + "/" + ("00" + mydate.getDate()).slice(-2) + "/" + mydate.getFullYear());
+            
+             
+        }, 5)
+   
+    $scope.cancel = function() {
+        $scope.$dismiss();
+    };
+    $scope.ok = function() {
+        var mydate =  $scope.holding ;
+        mydate  &&  $scope.$field.$setViewValue(mydate )
+        $scope.$close();
+    };
+
+    function getDate(mydate, ev){
+        mydate  = mydate  || new Date();
+        if(ev.date){
+            mydate.setFullYear(ev.date.getFullYear());
+            mydate.setMonth(ev.date.getMonth());
+            mydate.setDate(ev.date.getDate());    
+        }
+        if(ev.time){
+            if (ev.time.meridian == "AM" && ev.time.hours == 12) mydate.setHours(0);
+            else if (ev.time.meridian == "PM" && ev.time.hours == 12) mydate.setHours(12);
+            else if (ev.time.meridian == "PM") mydate.setHours(e.time.hours + 12);
+            else h = mydate.setHours(ev.time.hours);
+            mydate.setMinutes(ev.time.minutes)    
+        }
+        if(!$scope.showTimepicker){
+            mydate.setHours(0);
+            mydate.setMinutes(0);
+        }
+            
+        mydate.setSeconds(0);
+        return mydate;
+    }
+    
+});
+})();  // end enclosure
+ 
+
+/******* angoose-ui filename: controllers/s3file.js   *******/
+/**
+ * Deform field directives
+ *  
+ * 
+ * Usage:
+ * 
+ * 
+ */
+(function(){
+angular.module('angoose.ui.controllers'  ).controller("dfc-s3file", function($scope, $injector, $upload, $schema, angoose , $alert){
+    enterscope($scope, "File upload");
+    var accept  = $schema.options.accept || [];
+    $scope.$validationMessages = {
+        "validFileType": "Only these file types are accepted: "+ accept.join(", ")
+    }
+    $scope.onFileUpload = function($files){
+        console.log("file uploaded", $files);
+        var $file = $files[0];
+        $scope.$field.$setValidity('validFileType', true );
+        if( accept  && accept.length && accept.indexOf($file.type) <0  ){
+            $scope.$field.$setViewValue('');
+            $scope.$field.$setValidity('validFileType', false );
+            return;
+        }
+        var bucket = $schema.options.bucket;
+        var filePath = $schema.options.filepath;
+        var key = {};
+        $scope.instance.getS3Key(bucket, filePath, $file.name, $file.type ).then(function(key) {
+            $upload.upload({
+                url: 'https://' +  bucket + '.s3.amazonaws.com',
+                method: 'POST',
+                data: {
+                    'key': key.path,
+                    'AWSAccessKeyId': key.accesskey,
+                    'acl': 'public-read',
+                    'policy': key.policy,
+                    'signature': key.signature,
+                    'success_action_status': '201'
+                    //'Content-Type': key.mime_type
+                },
+                file: $file
+            }).success(function(data) {
+                if(data){
+                   var s3file = unescape($($.parseXML(data)).find('Location').text());
+                   angoose.logger.debug("S3 uploaded successfully: ", s3file);
+                   //$scope.instance.set($scope.path, unescape($($.parseXML(data)).find('Location').text())  );
+                   $scope.$field.$setViewValue(s3file);
+                }
+            }).error(function(data){
+                angoose.logger.error("S3 Upload failed", data);
+                $alert.error("S3 Upload failed: "+  data);
+                $scope.$field.$setViewValue('');
+            });
+        }, function(err){
+            angoose.logger.debug("S3Key  error", err);
+            $scope.$field.$setViewValue('');
+        });
+
+    };
+});
+ 
+})();  // end enclosure
+
+/******* angoose-ui filename: controllers/select.js   *******/
+/**
+ * Deform field directives
+ *  
+ * 
+ * Usage:
+ * 
+ * 
+ */
+(function(){
+angular.module('angoose.ui.controllers'  ).controller("dfc-select", function($scope, $injector, $schema ){
+        //console.log("In Select Ctrl", $scope.path , $schema  );
+        if(!$schema || !$schema.options || !$schema.options['enum'] || !$schema.options['enum'].length) return;
+        $scope.selectOptions = {};
+        
+        angular.forEach($schema.options['enum'], function(item){
+            $scope.selectOptions[item] = item;
+        });
+        // set the default value
+        if(  $schema.options['default'] && $scope.path  && $scope.instance && !$scope.instance[$scope.path])
+            $scope.instance[$scope.path] =   $schema.options['default'];
+});
+ 
+ 
+
+
+})();  // end enclosure
+
+/******* angoose-ui filename: controllers/selector.js   *******/
+/**
+ * Deform field directives
+ *  
+ * 
+ * Usage:
+ * 
+ * 
+ */
+(function(){
+    
+ 
+angular.module('angoose.ui.controllers').controller("dfc-selector", function($scope, $injector, $schema, $ui, inputElement, templateElement, $timeout){
+        enterscope($scope, "selector ctrl: "+ $scope.path);
+        window.s2em = inputElement;
+        window.selscope = $scope;
+        var scope = $scope;
+        var pathSchema = $schema;  
+        //console.log("selector pat schema is ", $schema)
+        if(!pathSchema) return;
+        
+        var refModelName = $ui.camelcase(  $ui.getReference(pathSchema) ); 
+        var isRefArray = Array.isArray(pathSchema.options.type);
+        //var isRef = 
+        console.log("Is ref:", refModelName, isRefArray );
+        if(!refModelName && ! isRefArray) return ;
+        
+        var refModel = $injector.get(refModelName);
+
+        function format(objId){
+            
+            var object =  optionCandidates[objId] || objId;
+            //console.log("formating result", object)
+            if(object && object.getDisplayName) return object.getDisplayName();
+            
+            if($ui.getter(object, 'meta.name.first')) return object.meta.name.first +" "+ object.meta.name.last;
+            if($ui.getter(object, 'meta.name')) return object.meta.name;
+            if($ui.getter(object, 'name.first')) return object.name.first +" "+ object.name.last;
+            if(object && object.name) return object.name;
+            //if(object && object.type) return object.type + object._id
+            
+            return objId;
+        }
+        ///scope.select2name = scope.path.replace(/\./g, '_') +"Select2Options"
+        // we keep the select2 query result in this variable for formatting lookup. We can't use object directly as value for the model. '
+        var optionCandidates = {}; //@ todo: cache invalidation      
+        scope.select2options = {
+            placeholder: 'Please Select '+  refModelName,
+            id: function(obj){
+                 return (obj && obj._id) ? obj._id: obj;
+            },
+            formatResult: format,
+            formatSelection:format,
+            multiple: isRefArray,
+            query: function(query){
+                var filter = {} ;// query.term?{'meta.name': { $regex:query.term, $options:'i'} }:{};
+                 if(query.term){
+                    filter["$or"]= [{'meta.name':  { $regex:query.term, $options:'i'} }, {'meta.name.sortable':  { $regex:query.term, $options:'i'} } ];
+                 }
+                refModel.find(filter, {'meta.name':1, name:1,type:1}, function(err, results){  //@todo: generic name fields
+                    
+                    var data = _.map(results, function(off){
+                        optionCandidates[off._id] = off;
+                        return off 
+                    });
+                    //console.log("Query result", data.length) 
+                    query.callback({results:data, more:false});
+                });                       
+            },
+            initSelection:  initSelection
+        }
+        function initSelection(em, callback){
+            var values = em.val? em.val() : em
+            //console.log("#### initSelection", values)
+            if(!values || (Array.isArray(values ) && values.length == 0))
+                return;
+            var values = Array.isArray(values)  ? values: [values];
+            var selectedObjects = [];
+            var lookupIDs = [];
+            values.forEach(function(obj){
+                var objId = typeof(obj) == 'string'? obj: obj._id;
+                if(!optionCandidates[objId])  lookupIDs.push(objId);
+                else selectedObjects.push(optionCandidates[objId]);
+            })
+            if(lookupIDs.length>0){
+                //console.log("lookup ids", lookupIDs)
+                refModel.find({_id: {'$in': lookupIDs} }, {'meta.name':1, name:1, type:1}, function(err, results){  //@todo: generic name fields 
+                    results && results.forEach(function(res){
+                        optionCandidates[res._id] = res;
+                        selectedObjects.push(res);
+                    });
+                    callback(selectedObjects);
+                });    
+            }
+            else{
+                callback(selectedObjects);
+            }
+        }  
+        // the ngModel is not initialized at this point, so we need to wait a bit after ngModel is rendered
+        
+        scope.$watch(inputElement.attr('ng-model'), function(curr, old){
+            if(!curr || ( !Array.isArray(curr) && ! curr._id) ) return;
+            
+            var ids = [];
+            curr = Array.isArray(curr)? curr: [curr];
+            for(var i=0;i<curr.length;i++){
+                var it = curr[i]
+                if(!it._id) return;
+                ids.push(it._id)
+                it =  optionCandidates[it._id] || it;
+                if(it.meta  || it.name ) // already populated
+                    return;
+            }
+            
+            initSelection(ids, function(selectedObjects){
+                var obj = Array.isArray(selectedObjects) && selectedObjects.length == 1? selectedObjects[0] : selectedObjects;
+                inputElement.controller("ngModel").$setViewValue( obj );
+            });
+            /**
+            console.log("Ref model value", curr)
+            if(curr   && curr._id && ! optionCandidates[curr._id]){
+              //@todo generic field  
+                refModel.findById(curr._id, {'meta.name':1, name:1}, function(err, obj){
+                    if(err){
+                        console.error("Error loading ref field value", err);
+                        return;
+                    }
+                    console.log("inital obj", obj);
+                    inputElement.controller("ngModel").$setViewValue(obj);
+                    optionCandidates[obj._id] = obj;
+                })
+            }*/
+        })
+        
+});
+ 
+ 
+
+
+})();  // end enclosure
+
+/******* angoose-ui filename: directives/ang-edit.js   *******/
+(function(){
+angular.module('angoose.ui.directives').directive("deformView", viewDirective).directive("deformEdit",  editDirective);
+angular.module('angoose.ui.directives').directive("angView", viewDirective).directive("angEdit",  editDirective);
+
+
+function viewDirective(){
+      var directive = {
+        restrict:'AE',
+        scope:true
+    };
+    
+    directive.controller = function($scope, $element, $attrs, $routeParams, $injector ){
+        enterscope($scope,"DeformView");
+        prepareInstance($scope, $injector, $routeParams,   $attrs);
+        $scope.readonly = true;
+    }
+    return directive;
+    
+}
+function editDirective( $location, $routeParams, $injector, $ui, $alert , $compile){
+     var directive = {
+        restrict:'AE',
+        scope:true
+    };
+    
+    directive.compile = function(){
+        return function link($scope, $element, $attrs ){
+            enterscope($scope,"AngEdit");
+            $scope.isNew = $location.path().indexOf("create")>0; 
+            prepareInstance($scope, $injector, $routeParams,  $attrs);
+            // render template if needed
+            var $form = $scope.defineForm();
+            
+            $ui.resolveAndCompile($scope, $element, $attrs, $form, 'deform.edit.tpl');
+            // $ui.resolveTemplate($element, $attrs, $form, 'deform.edit.tpl').then(function(em){
+                // if(em){
+                    // console.log("Resolved template, compiling(default: edit.tpl')")
+                    // $element.html("<!-- CLEARED -->"); // first clear the inline template
+                    // $element.append(em);
+                    // $compile(em)($scope);
+                // }
+            // }, function(err){
+                // console.error("Error resolving template(edit.tpl)", err);
+            // });
+            
+            $scope.saveForm = function(){
+                if(!$scope.instance) return;
+                // depopulate
+                $scope.$emit("save");
+                $scope.instance.save(function(err, result){
+                    $scope.$emit("afterSave");
+                    if(err) $alert.error(err+"");
+                    else{
+                        window.history.back();
+                        $alert.success("Successfully saved data", 10);
+                        // MessageBox.success("Successfully saved data.", function(){
+                          // //$location.path("/deform/" + $scope..modelName+"/list");  
+                          // window.history.back();
+                        // });
+                    } 
+                })
+            }
+            $scope.reset = function(){
+                $scope.instance = modelClass.$get({_id: modelId});
+            }
+            $scope.cancelEdit = function(){
+                $scope.$emit("cancel");
+                window.history.back();
+            }
+            
+        }
+    };
+    return directive;
+}
+function prepareInstance($scope, $injector, $routeParams,  $attrs){
+        //console.log("prepare scope", $scope.$id, " parent id", $scope.$parent.$id)
+        var $ui = $injector.get("$ui");
+        var modelName = $ui.resolveAttribute('modelName', $scope, $routeParams, $attrs)
+        
+        var modelClass = $injector.get( $ui.camelcase( modelName));
+        var modelId = $ui.resolveAttribute('modelId', $scope, $routeParams, $attrs);
+        
+        function processSchema(modelName, modelClass){
+            var formSpec = $scope.defineForm( {
+                modelName: modelName,
+                modelClass: modelClass,
+                modelSchema: modelClass.schema
+            });
+            var groups = {};
+            groups.sorted_groups  = [""]; // work around angular's collectionKeys.sort 
+            var refPaths = [];
+            var indx = 0;
+            Object.keys(modelClass.schema.paths).forEach(function(path){
+                var data = modelClass.schema.paths[path];
+                if($ui.filterPath(path,data, modelClass.schema)) return;
+                var group = "";
+                if(path.indexOf(".")>=0)
+                    group = path.substring(0, path.indexOf("."));
+                group = group == 'meta' ? "": group; // meta is considered default group
+                if(groups.sorted_groups.indexOf(group)<0) groups.sorted_groups.push(group);
+                
+                groups[group] = groups[group] || {}
+                groups[group][path] = data;
+                groups[group].sorted_paths = groups[group].sorted_paths||[];
+                groups[group].sorted_paths.push(path);  
+                if(data.instance == 'ObjectID' && data.options.ref) refPaths.push(path);    
+            });
+            
+            $scope.groups = groups;
+        }
+        
+        
+        if(!$scope.isNew){
+            modelClass.findById(modelId).done(function(modelInstance){
+                $scope.instance =  modelInstance;
+                modelClass = modelInstance.constructor || modelClass;
+                processSchema(modelClass.modelName, modelClass);
+  
+            }, function(err){
+                console.error(err);
+                $injector.get('$alert').error(err+"");
+            });    
+        }
+        else {
+            $scope.instance =  new modelClass();
+            processSchema( modelName, modelClass);
+            
+        }
+}   
+
+})(); // scope wrapper
+
+/******* angoose-ui filename: directives/ang-field.js   *******/
+(function(){
+angular.module('angoose.ui.directives').directive('deformField', angField).directive('angField', angField);
+
+function angField($compile, $templateCache, $interpolate, $injector, $controller, $ui, angoose) {
+  
+
+  // Find the "input" element in the template.  It will be one of input, select or textarea.
+  // We need to ensure it is wrapped in jqLite\jQuery
+  function findInputElement(templateElement) {
+    return angular.element(templateElement.find('input')[0] || templateElement.find('select')[0] || templateElement.find('textarea')[0]);
+  }
+
+  function findLabelElement(templateElement) {
+    return templateElement.find('label');
+  }
+
+  // Search through the originalDirective's element for elements that contain information about how to map
+  // validation keys to messages
+  function getValidationMessageMap(originalElement) {
+    // Find all the <validator> child elements and extract their (key, message) info
+    var validationMessages = {};
+    angular.forEach(originalElement.find('validator'), function(element) {
+      // Wrap the element in jqLite/jQuery
+      element = angular.element(element);
+      // Store the message info to be provided to the scope later
+      // The content of the validation element may include interpolation {{}}
+      // so we will actually store a function created by the $interpolate service
+      // To get the interpolated message we will call this function with the scope. e.g.
+      //   var messageString = getMessage(scope);
+      validationMessages[element.attr('key')] = $interpolate(element.text());
+    });
+    return validationMessages;
+  }
+
+  // Find the content that will go into the new label
+  // Label is provided as a <label> child element of the original element
+  function getLabelContent(element) {
+    var label = element.find('label');
+    return label[0] && label.html();
+  }
+  
+  function getTemplateContent(element){
+      var em = element.find('template');
+      if(!em) return null;
+      if(!em.attr('name') && ! em.attr("url"))
+        return em[0] && em.html();
+      return em.attr('name') || em.attr('url');
+  }
+
+    
+  return {
+    restrict:'E',
+    scope:{
+      instance:'=',
+      path:'=',
+      modelSchema:'=',
+      fieldSchema:'=',
+      readonly:'@'
+    },
+    //require:'?ngModel',
+    priority: 100,        // We need this directive to happen before ng-model
+    terminal: true,       // We are going to deal with this element
+    compile: function(element, attrs) {
+      if ( attrs.ngRepeat || attrs.ngSwitch || attrs.uiIf ) {
+        throw new Error('The ng-repeat, ng-switch and ui-if directives are not supported on the same element as the field directive.');
+      }
+      if ( !attrs.ngModel ) {
+        //throw new Error('The ng-model directive must appear on the field element');
+      }
+
+      // Extract the label and validation message info from the directive's original element
+      var validationMessages = getValidationMessageMap(element);
+      var labelContent = getLabelContent(element);
+      
+      // Clear the directive's original element now that we have extracted what we need from it
+      element.html('');
+        
+      return function postLink(scope, element, attrs, ngModelController) {
+          
+        window.pscope = scope;
+        if(scope.path && scope.path.indexOf("_") == 0) return;
+        
+        enterscope(scope, "deform-field "+ scope.path)
+        var customTemplate  =  attrs.template;
+        var customController = attrs.controller;
+        var customDirective = attrs.directive;
+        
+        var modelClass = scope.instance && scope.instance.constructor;
+         
+        //var schema = getSchema( scope.instance).paths[scope.path] ;
+        var modelSchema = scope.modelSchema || (modelClass && modelClass.schema);
+        //if(!modelSchema) console.error("Model schema lost in scope ", scope.$id, "parent is ", scope.$parent.$id)
+        
+        var schema = scope.fieldSchema || ( modelClass && modelClass.schema.paths[scope.path]);
+        if(!schema) {
+            return console.error("Missing schema for path", scope.path);
+        }
+        schema.options = schema.options || {};    
+        
+        var directive = customDirective || mapDirective(scope.path, schema, modelSchema)
+        var template = customTemplate || mapTemplate(scope.path, schema, modelSchema);
+        angoose.logger.trace("Field ", scope.path,  "template", template );
+        var labelContent =  attrs.label || schema.options.label ||scope.path;
+        
+        var childScope = scope.$new();
+        
+        function handleDirective(directive, childScope){
+            var html = '<directive-name path="path" model-schema="model-schema" field-schema="fieldSchema" instance="instance"></directive-name>';
+            html = html.replace('directive-name', directive);
+            var directiveElement = angular.element(html);
+            var labelElement = directiveElement.find('label');
+            labelElement.attr('for', childScope.$fieldId);
+            // Update the label's contents
+            labelElement.html(labelContent  );
+            element.append(directiveElement);
+            $compile(directiveElement)(childScope);
+        }
+        
+        angoose.logger.trace("Created child scope for deform-field ", scope.path,  childScope.$id, "using directive: ",directive)
+        if(directive){
+            handleDirective( directive, childScope);
+        }      
+        else
+        {
+            
+            // Load up the template for this kind of field, default to the simple input if none given
+            $ui.loadFieldTemplate(template ).then(function(templateElement) {
+              // Set up the scope - the template will have its own scope, which is a child of the directive's scope
+              
+              // Attach a copy of the message map to the scope
+              childScope.$validationMessages = angular.copy(validationMessages);
+              // Generate an id for the field from the ng-model expression and the current scope
+              // We replace dots with underscores to work with browsers and ngModel lookup on the FormController
+              // We couldn't do this in the compile function as we need to be able to calculate the unique id from the scope
+              childScope.$fieldId = scope.path.replace('.', '_').toLowerCase() + '_' + childScope.$id;
+              childScope.$fieldLabel = labelContent;
+    
+              // Update the $fieldErrors array when the validity of the field changes
+              childScope.$watch('$field.$dirty && $field.$error', function(errorList) {
+                  //angoose.logger.debug("Got error", errorList);
+                childScope.$fieldErrors = [];
+                angular.forEach(errorList, function(invalid, key) {
+                  if ( invalid ) {
+                    childScope.$fieldErrors.push(key);
+                  }
+                });
+              }, true);
+    
+    
+              // Copy over all left over attributes to the input element
+              // We can't use interpolation in the template for directives such as ng-model
+              var inputElement = findInputElement(templateElement);
+              angular.forEach(attrs.$attr, function (original, normalized) {
+                var value = element.attr(original);
+                inputElement.attr(original, value);
+              });
+              inputElement.attr("ng-model", "instance."+ scope.path);
+              //console.trace("NGMODEL #### ", inputElement.attr('ng-model'))
+    
+              // Wire up the input (id and name) and its label (for).
+              // We need to set the input element's name here before we compile the template.
+              // If we leave it to be interpolated at the next $digest the formController doesn't pick it up
+              inputElement.attr('name', childScope.$fieldId);
+              inputElement.attr('id', childScope.$fieldId);
+              if(scope.readonly || schema.options.readonly === true) inputElement.attr('readonly', "true");
+              schema.options.required && inputElement.attr('required', 'true');
+              var labelElement = templateElement.find('label');
+              labelElement.attr('for', childScope.$fieldId);
+              // Update the label's contents
+              labelElement.html(labelContent);
+    
+              // Place our template as a child of the original element.
+              // This needs to be done before compilation to ensure that it picks up any containing form.
+              element.append(templateElement);
+    
+                // filed controller
+                //var fieldController = customController || "dfController"+ camelcase(template);
+                var fieldController = customController || "dfc-"+template;
+                
+                try{  
+                    $controller(fieldController, {$scope: childScope, $schema: schema, inputElement: inputElement, templateElement: templateElement}) 
+                    angoose.logger.trace("Invoked custom controller", fieldController);
+                }
+                catch(err){
+                    //console.error("fieldControoler error", err)
+                }
+                // We now compile and link our template here in the postLink function
+                // This allows the ng-model directive on our template's <input> element to access the ngFormController
+                $compile(templateElement)(childScope);
+    
+                // Now that our template has been compiled and linked we can access the <input> element's ngModelController
+                childScope.$field = inputElement.controller('ngModel');
+                window.ngModelCtrl = childScope.$field
+                          
+    
+            });
+          } // end loadTemplate
+      }; // end postLink
+    }
+  };
+}
+// ** mapDirective **
+//
+// Default mapping based on schema definition:
+
+// - list of sub schemas: deform-sublist
+// - single subschema object: deform-subschema
+ 
+function mapDirective(path, pathSchema, modelSchema){
+    if(! pathSchema.schema)  return null;
+    
+    if(pathSchema.options && Array.isArray(pathSchema.options.type))
+        return "deform-sublist"
+    else
+        return "deform-subschema"
+}    
+
+// ** mapTemplate **
+//
+// Default mapping for Mongoose schema type -> form field
+//      
+// - ObjectID: selector
+// - Boolean: Checkbox
+// - String: input
+// - Number: input
+// - Date: ? 
+// - Array of simple types: selector multi
+// - Array of ref objects: selector multi
+// - String/Number with enum values:  Select
+// - Mixed: ??
+//  
+function mapTemplate(path, pathSchema, modelSchema){
+    if(pathSchema.options.template) return pathSchema.options.template;
+    if(pathSchema.options.multiline) return "textarea"
+    var template = 'input';
+    var opts = pathSchema.options || {};
+    //@todo: refactor them into subclasses
+    
+    switch(pathSchema.instance || (pathSchema.options && pathSchema.options.type)){
+        case 'ObjetcID':
+            if(opts.ref)    template = 'selector';
+            break; 
+        case 'Boolean':
+            template = 'checkbox';
+            break;
+        case 'Date':
+        case 'String':
+        case 'Number':
+        default:
+            break;
+    }
+    if(getRef(pathSchema))
+        template = "selector";
+    if(Array.isArray(opts['enum']) && opts['enum'].length>0){
+        template = "select";
+    }
+    if(Array.isArray(opts.type )){
+        if(pathSchema.caster){
+            /** array of simple types */
+        }
+    }
+    
+    angoose.logger.trace("Path ", path, " Type ", pathSchema , " template: ", template)
+    return template;
+}
+
+function getRef(pathSchema){
+    var opts = pathSchema.options;
+    
+    /** Mongoose, array of ObjectIDs */
+    if( Array.isArray(opts.type) && opts.type.length>0  &&  opts.type[0] && opts.type[0].ref ) 
+        return opts.type[0].ref;
+    /** Single ObjectID Reference*/
+    if(pathSchema.instance == 'ObjectID' && opts.ref) return opts.ref;
+    
+    
+    if(pathSchema.options.ref && pathSchema.instance == 'CustomRef'){
+        /** deform custom ref*/
+       return pathSchema.options.ref;    
+    }
+    /** deform rich reference, array */
+    if(Array.isArray(opts.type ) && pathSchema.caster && 
+            pathSchema.caster.instance == 'CustomRef' && pathSchema.caster.options.ref ){ 
+        return pathSchema.caster.options.ref;
+    }
+        
+    return null;
+}
+function camelcase(str){
+    return str? str.substring(0,1).toUpperCase() + str.substring(1): str;
+}
+})();  // end enclosure
+
+/******* angoose-ui filename: directives/ang-filter-by.js   *******/
+angular.module('angoose.ui.directives').directive("deformFilterBy", function($ui){
+    function schemaType(schema){
+        var type = $ui.getter(schema, 'options.type');
+        return type;
+    } 
+    var directive = {
+        restrict:'A', 
+        scope:true
+    }
+     directive.link = function($scope,  $element, $attrs){
+        enterscope($scope, "filterby "+ $attrs.deformFilterBy)
+        var filterField  =    $attrs.deformFilterBy; //@ todo: evaluatable? $scope.$eval($attrs.deformFilterBy);
+        var filterOp = $attrs.filterOp || 'contains';
+        var searchable = true;
+        
+        if(schemaType($scope.fieldSchema) == 'Number'){
+            searchable = false;
+        }
+        if($ui.getter($scope.fieldSchema, 'options.searchable') !== undefined){
+             searchable = false;  
+        }
+        $scope.searchable = searchable ;
+        if(!searchable) return;
+        if(!$scope.dmeta) throw "ang-filter-by must be used in ang-list scope"
+        
+        if($ui.isCustomRef( $scope.fieldSchema)){
+            filterField = $ui.getCustomRefKeyfieldPath($scope.fieldSchema);
+        }
+        var spec = $scope.dmeta.spec;
+        var keyupHandler  =  function(){
+            spec.filter = spec.filter || {};
+            console.log($attrs.deformFilterBy, " value is " , $element.val());
+            var term = $element.val();
+            if(!term){
+                // empty string, remove this criteria
+                delete spec.filter[filterField]
+            }
+            //if(term && term.length == 1)  return;
+            if( filterOp == 'contains' ){
+                spec.filter[filterField] = { $regex: term, $options:'i'};
+                spec.random = new Date() + Math.random(); // angular.equals() ignores the property name starts with $, so we set a random value to trigger the $watch   
+            }
+            else if(filterOp == 'equals'){
+                spec.filter[filterField] = term;
+            }
+        }
+        $element.on("keyup", $ui.debounce(500,  function(){
+            $scope.$apply(keyupHandler)
+        })) ; 
+         
+     }
+    return directive;
+});  
+
+ 
+
+/******* angoose-ui filename: directives/ang-list.js   *******/
+(function(){
+angular.module('angoose.ui.directives').directive("deformListing", angList ).directive("angList", angList);
+
+function angList( $templateCache, $routeParams, $compile, $location, $injector, MessageBox, $log ,$route, $ui, $controller, angoose){
+    // this is the main controller for the sort-paging-filtering list
+    var directive = {
+        restrict:'AE'
+    }; 
+    directive.compile = function(element, attrs){
+        angoose.logger.trace("In ang-list compile");
+        var preLink = function($scope, $element, $attrs){
+            /** we do this in prelink because child directives needs the dmeta setup below */
+            enterscope($scope, "ang-list  prelink",  $route.current);
+            
+            /**@todo: calling custom controller here is kinda not the right angular way, but we augment the $scope */
+            // get the configured defaults
+            // var ctrl = $ui.getConfig($location.path());
+            // if(ctrl){
+                // console.log("Calling user defined controller", ctrl)
+                // $controller ( ctrl, {$scope: $scope, $element:$element, $attrs: $attrs});
+            // }
+            // if($routeParams.customController) {
+                 // $controller ( ($routeParams.modelName+"-list-"+ $routeParams.customController).toLowerCase(), {$scope: $scope});
+            // }
+            var dmeta = $scope.defineQuery();
+            // $scope.dmeta = $scope.dmeta || {};
+            // var dmeta = $scope.dmeta; 
+            /** order or presedence: custom controller -> directive -> route params  */
+            dmeta.modelName =   dmeta.modelName || $attrs.modelName || $routeParams.modelName ; 
+            try{
+                dmeta.modelClass = $injector.get($ui.camelcase( dmeta.modelName  ));    
+            }
+            catch(err){
+                console.error("Error in deformListing controller", err)
+                MessageBox.error("Model "+ dmeta.modelName+" is not defined")
+                return;
+            }
+            
+            dmeta.pageTitle = dmeta.pageTitle || $ui.camelcase(dmeta.modelName) + " List"
+            dmeta.actionColumn = dmeta.actionColumn === undefined ? true: dmeta.actionColumn;
+            if(Array.isArray(dmeta.columns) && dmeta.columns.length > 0){
+                var cols = [];
+                for(var i=0;i< dmeta.columns.length;i++){
+                    var item = dmeta.columns[i];
+                    var pathname = typeof(item) == 'string'? item: item.path;
+                    var original = $ui.getPathSchema(dmeta.modelClass, pathname);
+                    if(typeof(item) == 'object') 
+                        item = angular.extend( angular.extend({}, original), item)
+                    else
+                        item = original;
+                    if(!item)  item = {path: pathname, options: {sortable:false } } 
+                    cols.push( item );
+                }
+                dmeta.columns = cols;
+            }
+            else
+                dmeta.columns =  findTagged(dmeta.modelClass, 'default-list');
+            //dmeta.spec = dmeta.spec || { filter:{} }
+            var spec = dmeta.spec;
+            // controller -> directive
+            if(!spec.preset && $attrs.defaultFilter)  
+                spec.preset =  $scope.$eval($attrs.defaultFilter);
+            
+            var defaultSortField = getDefaultSortField(dmeta.modelClass) ;
+            //controller -> directive -> default
+            spec.sortBy = spec.sortBy || ($attrs.defaultSort? $attrs.defaultSort : '');
+            spec.sortBy = spec.sortBy || (  defaultSortField? defaultSortField.path: '' );
+                
+            spec.sortDir = spec.sortDir || ($attrs.sortDir?$attrs.sortDir:'');
+            spec.sortDir = spec.sortDir || (defaultSortField? defaultSortField.options.defsort: 'asc');
+                
+            //console.log($scope.dmeta.columns, " ### COLOUMNS" )
+            $scope.remove = function(index){
+                //MessageBox.warn("This will delete "+  $scope.instances[index].getDisplayName() +", please confirm");
+                
+                MessageBox.confirm("This will delete selected item, continue?", function(){
+                    $scope.instances[index].remove( function(err,res){
+                        if(!err){
+                            MessageBox.success("Operation Successful");
+                            $scope.instances.splice(index, 1);  
+                        } 
+                    } );    
+                }, function(){
+                    
+                })
+            }
+            $ui.resolveAndCompile($scope, $element, $attrs, dmeta, 'deform.list.tpl');
+//             
+            // $ui.resolveTemplate(element, $attrs, dmeta, 'deform.list.tpl').then(function(em){
+                // console.log("Resolved template, compiling(default: list.tpl')", em)
+                // if(em){
+                    // $element.html("<!-- CLEARED -->"); // first clear the inline template
+                    // $element.append(em);
+                    // $compile(em)($scope);
+                // }
+            // }, function(err){
+                // console.error("Error resolving template(list.tpl)", err);
+            // });
+            
+         }
+         var postLink = function($scope, $element, $attrs){
+            enterscope($scope, "postlink ang listing");
+            var spec =   $scope.dmeta.spec;
+            
+            $scope.$watch("dmeta.spec", function(newVal, oldVal){
+                angoose.logger.trace("Filter changed", newVal, oldVal);
+                // handles the search fields, we need to make a copy of the search filters so that it won't trigger the $watch
+                var mQuery = angular.extend({}, spec.filter);
+                if(spec.preset)
+                    mQuery = angular.extend(mQuery, spec.preset); // preset filter takes presedence
+                angular.forEach(mQuery, function(val, key){
+                   if(val === '$CLEAR$')
+                        delete mQuery[key]; 
+                });
+                
+                var mSelection = null; //@TBD
+                var mOptions = {};  // limit, skip, sort
+                if(spec.sortBy){
+                    mOptions.sort = (spec.sortDir && spec.sortDir.toLowerCase() == 'desc')? "-":"";
+                    mOptions.sort += spec.sortBy; 
+                }
+                if(spec.pageSize) {
+                    mOptions.limit = spec.pageSize;
+                    if(spec.page > 1)
+                        mOptions.skip = (spec.page-1) * spec.pageSize
+                }
+                    
+                angoose.logger.trace("Updating search: ", mQuery ,mOptions, $scope.dmeta.modelName);
+                $scope.instances = $scope.dmeta.modelClass.$query(mQuery, mSelection, mOptions )
+                $scope.dmeta.modelClass.count(mQuery).done(function(total){
+                    //if(err) $log.error("Error getting total. Query: ", mQuery, " Error:", err);
+                    spec.$total = total || 0;
+                }); 
+               
+            }, true);
+            
+            
+            $scope.cells = [];
+            
+            
+            // var templateUrl = $attrs.templateUrl;
+            // if(!templateUrl && !element.html()){
+                // templateUrl = "deform.list.tpl"; // default
+            // } 
+            // if(templateUrl){
+                // element.html("<!-- to be replaced by contents from "+  templateUrl+" -->");
+                // console.log("Loading templateUrl",  templateUrl);
+                // $ui.loadTemplate(templateUrl).then(function(em){
+                    // console.log("Compiling template  ", em);
+                    // element.append(em);
+                    // $compile(em)($scope);     
+                // }, function(er){
+                    // console.log("Failed to load template",  templateUrl)
+                // })
+            // }
+            
+            // $compile template if provided
+            // var template = getTemplate(scope.data);
+            // element.html(template);
+            // 
+            
+        } // end link
+        return {pre:preLink, post:postLink }
+        
+    }; // end compile
+   
+    return directive;
+};  // end directiveFunc
+
+// get a list of fields with a specific tag
+function findTagged(modelClass,tag){
+    if(!modelClass || !modelClass.schema) return [];
+    var cols = [];  
+    Object.keys(modelClass.schema.paths).forEach(function(path){
+        var data = modelClass.schema.paths[path];
+        if(data.options.tags && data.options.tags.indexOf(tag)>=0)
+            cols.push(data);
+    });
+    return cols;
+}
+
+function getDefaultSortField(modelClass){
+    if(!modelClass || !modelClass.schema) return [];
+    var ret = null; 
+    Object.keys(modelClass.schema.paths).forEach(function(path){
+        var data = modelClass.schema.paths[path];
+        if(data.options.defsort && typeof(data.options.defsort) == 'string')
+             ret = data;
+    });
+    return ret;
+}
+})(); // scope wrapper
+
+
+
+function enterscope(scope, name, arg1) {
+	angoose.logger.trace("Entering scope ", name, scope.$id, arg1)
+	window['scope' + scope.$id] = scope;
+}
+
+
+/******* angoose-ui filename: directives/ang-paginator.js   *******/
+(function(){
+angular.module('angoose.ui.directives').directive('deformPaginator', function(){
+    // this sub directive handles the paging. It can only used inside the the spflist
+    var directive = {
+        restrict:'A',
+        template: paginatorTemplate() 
+        //scope:true
+    }
+    directive.link = function($scope,$element, $attrs){
+        enterscope($scope, "paginator");
+        if(!$scope.dmeta) throw "Paginator must be used in deform-listing scope"
+        var spec = $scope.dmeta.spec;
+        spec.page = 1;
+        spec.start = 1;
+        spec.pageSize = 25; 
+        if($attrs.pageSize) 
+            spec.pageSize = parseInt($attrs.pageSize) 
+        spec.$end = spec.start + spec.pageSize -1;
+            
+        $scope.nextPage = function(e){
+                console.log("next page clicked", arguments)
+            if(  spec.start + spec.pageSize > spec.$total) return;
+            $scope.setPage (spec.page + 1);
+        }
+        $scope.previousPage = function(){
+            console.log("previous page clicked")
+            if( spec.page <=1) return;
+            $scope.setPage(spec.page -1);
+        }
+        $scope.setPage = function(pageNo){
+            console.log("Set page called with number ", pageNo );
+            spec.page = pageNo || spec.page ;
+            spec.start = (spec.page -1 ) * spec.pageSize + 1
+            spec.$end = spec.start + spec.pageSize -1;
+        }
+        //$scope.setPage();
+        $scope.paginator = spec;
+    }
+    return directive;
+});
+  
+
+function paginatorTemplate(){
+    return "<span style='display: inline;'> {{ paginator.start }} - {{ paginator.$end > paginator.$total ? paginator.$total: paginator.$end }} of {{ paginator.$total }}\n" +
+             
+            "    <span class='break'></span>\n" + 
+            "  <span ng-if='paginator.pageSize < paginator.$total' >"+
+            "    <span href='#' class='box-page' ng-click='previousPage()' style='cursor:pointer' ><i class='icon-chevron-left'></i></span>" + 
+            "    <span class='break'></span>\n" + 
+            "    <span href='#' class='box-page' ng-click='nextPage()' style='cursor:pointer'><i class='icon-chevron-right'></i></span>" +
+            "  </span>"+ 
+            "</span>\n" + 
+            "";
+}
+
+})(); // scope wrapper
+ 
+
+/******* angoose-ui filename: directives/ang-render.js   *******/
+angular.module('angoose.ui.directives').directive("deformRender", function($controller, $ui, $filter, $http, $templateCache, $compile){
+    
+     var directive = {
+        restrict:'AE'
+     }
+     directive.compile = function(element, attrs){
+        if(attrs.path == '$ACTION'){
+            element.html('');
+        }
+        return  function postLink($scope, $element, $attrs){
+            var path = ($scope.fieldSchema && $scope.fieldSchema.path) || $attrs.path;
+            var pathSchema =$scope.fieldSchema;
+            enterscope($scope, "deformRender " +  path +" #"+ $attrs.row);
+            
+            var row = $attrs.row;
+            var rawValue = $ui.getter($scope.instance, path );
+            $scope.value = undefined;
+            if( typeof($scope.dmeta.render) == 'function'){
+                $controller(  $scope.dmeta.render, {   
+                                        $scope:$scope, 
+                                        $path:path, 
+                                        $value:rawValue,
+                                        $row: $attrs.row,
+                                        $element: $element
+                });
+            }
+            if(typeof($scope.value)=='undefined' && path !='$ACTION'){
+                // unhandled, default handler
+                if($ui.isCustomRef(pathSchema)){
+                    $scope.value = $ui.getCustomRefValue($scope.instance, pathSchema);
+                }
+                if( rawValue && $ui.getter( pathSchema, 'options.type') == 'Date' ){
+                    $scope.value = $filter('date')( new Date(rawValue), 'short');
+                }   
+                $scope.value = $scope.value ||  rawValue;
+            }
+            if(path  == '$ACTION'){
+                var template = $ui.getter($scope.dmeta ,  'templates.action') || 'deform-list-action-edit-delete';
+                function compileTemplate(templateHtml){
+                    templateHtml="<div>"+ templateHtml+"</div>"
+                    var em = angular.element(templateHtml)
+                    $element.append(em);
+                    $compile(em)($scope);
+                }
+               
+                if(template.indexOf("deform") !=0){
+                    console.log("template content itself");
+                    return compileTemplate(template);
+                }
+                $http.get(template, {cache:$templateCache}).then(function(response) {
+                    console.log("Loading template", template, response.data)
+                    compileTemplate(response.data);
+                }, function(response) {
+                  throw new Error('Template not found: ' + template);
+                  //console && console.error("teamplte note found", templateName)
+                });    
+            }
+         }// end link function
+     }// end compile function
+     return directive;
+});
+ 
+ 
+  
+
+/******* angoose-ui filename: directives/ang-sortable.js   *******/
+angular.module('angoose.ui.directives').directive('deformSortable', function($ui, angoose){
+    var directive = {
+        restrict:'AE',
+        scope:true 
+    };
+    directive.compile = function(element, attrs){
+        element.html( '<span ng-click="doSort()">' + element.html() + '</span>'  );
+        return  function($scope,$element, $attrs ){
+            enterscope($scope, "ang-sortable ",  $attrs.path);
+            var sortBy = $attrs.deformSortable;
+            if(!sortBy) throw "deform-sortable directive requires a value to be specified as the sorting field."
+            var schema = $ui.getPathSchema($scope.dmeta.modelClass, sortBy);
+            //console.log("schema is", schema);
+            if(schema && schema.options && schema.options.sortable === false) return;
+            //if(!schema || !schema.options || !schema.options.sortable) return;
+            if(!$scope.dmeta) throw "deform-sortable must be used in deform-listing scope"
+             var spec = $scope.dmeta.spec;
+             $element.removeClass("sort-up").removeClass("sort-down");
+             if(spec.sortBy == sortBy ){
+                $element.addClass(  (spec.sortDir && spec.sortDir.toLowerCase() == 'desc') ? "sort-down":"sort-up");
+             }
+            $element.addClass("sort-clickable");
+            
+            $scope.doSort =  function(){
+                //if(!schema.options.sortable) return;
+                console.log("sort by clicked", sortBy);
+                if(spec.sortBy == sortBy){
+                    // reverse direction
+                    spec.sortDir =   (spec.sortDir && spec.sortDir.toLowerCase() == 'desc') ? 'asc':'desc';
+                }        
+                else {
+                    spec.sortBy = sortBy;
+                }
+                $element.parent().parent().find(".sort-up").removeClass("sort-up")
+                $element.parent().parent().find(".sort-down").removeClass("sort-down")
+                $element.addClass(  (spec.sortDir && spec.sortDir.toLowerCase() == 'desc') ? "sort-down":"sort-up");
+                console.log("Current sort", spec.sortBy , spec.sortDir )
+                //$scope.$parent.$digest();
+            };
+        } // end link
+    }; //end compile
+    return directive;
+    
+});  
+
+/******* angoose-ui filename: directives/ang-sublist.js   *******/
+angular.module('angoose.ui.directives').directive("deformSublist", function($ui){
+  var directive = {
+      restrict:'AE',
+      scope:{
+          instance:'=',
+          path:'=',
+          modelSchema:'=',
+          fieldSchema:'='
+      },
+      compile: function(element, attrs){
+          //element.html("sub elements");
+          return function link(scope, element, attrs){
+              enterscope(scope, "sublist path "+ scope.path)
+              var getter = scope.getter = $ui.getter;
+              console.debug("our data: ", getter(scope, 'instance.'+ scope.path));
+              
+              console.log("Creating sublist ", scope.$id)
+              // we can't just use sublist because nested scopes - where subscope may override parents
+              scope['sublist'+ scope.$id] = getter(scope, 'instance.'+ scope.path) || [];
+              $ui.setter(scope, 'instance.'+ scope.path, scope['sublist'+ scope.$id] );
+              scope.subschema =  $ui.getter(scope.fieldSchema, 'schema');
+              Object.keys(scope.subschema.paths).forEach(function(path){
+                  if($ui.filterPath(path, scope.subschema.paths[path], scope.subschema)){
+                    delete scope.subschema.paths[path];  
+                  } 
+              });
+              scope.sublist  = function(scopeId){
+                  return scope['sublist'+ scopeId];
+              }
+              scope.removeSublistItem = function($index){
+                  scope.sublist(scope.$id).splice($index, 1)
+              }
+              scope.addSublistItem = function(){
+                  scope.sublist(scope.$id).push({__toggle:1})
+              }
+              
+              $ui.resolveAndCompile(scope, element, attrs, null, 'deform.sublist.tpl');
+          }
+      }
+  };
+  return directive;   
+}).directive("deformSubschema", function($ui){
+    // this is not used as of 2/28/14
+    var directive = {
+      restrict:'AE',
+      //templateUrl: 'deform.subschema.tpl',
+      compile: function(element, attrs){
+          //element.html("sub elements");
+          return function link(scope, element, attrs){
+              enterscope(scope, 'sbuschema: ' + scope.path);
+              scope.getter = $ui.getter;
+              scope.subschema = scope.modelSchema && $ui.getter( scope.modelSchema.paths[  scope.path ], 'schema');
+              $ui.resolveAndCompile(scope, element, attrs, null, 'deform.subschema.tpl');
+          }
+      }
+  };
+  return directive;   
+});
+
+
+   
+ 
+
+/******* angoose-ui filename: filters/camelcase.js   *******/
+'use strict'
+angular.module('angoose.ui.filters').filter('camelcase', function(){
+    return function(string){
+         if(!string || string.length ==0) return string;
+         return string.substring(0,1).toUpperCase() + string.substring(1)
+    }
+});
+
+/******* angoose-ui filename: filters/trustAsHtml.js   *******/
+'use strict'
+angular.module('angoose.ui.filters').filter('trustAsHtml', function($sce){
+    return function(text) {
+        return $sce.trustAsHtml(text);
+    };
+});
+
+
+function $angooseTemplateCache(name, content){
+
+    $angooseTemplateCache.templates = $angooseTemplateCache.templates || {"deform.create.tpl":"<!------------- angoose-ui filename: tpl/deform.create.tpl --> \n\t<div class=\"row-fluid\">\n\t\t<h4>\n\t\t</h4>\n\t</div>\t\n\t<div class=\"row-fluid tab-content\">\n\t\t<div class=\"box\">\n\t\t\t<div class=\"box-header\">\n\t\t\t\t<h2><i class=\"icon-list\"></i><span class=\"break\"></span>\n\t\t\t\t\tCreate {{ $form.modelName }} </h2>\n\t\t\t</div>\n\t\t\t<div class=\"box-content\">\n\t\t\t\t<form class=\"deform-form form-horizontal span12\" name=\"modelForm\" ng-submit=\"saveForm()\">\n\t\t\t\t\t<fieldset class=\"deform-set\" ng-repeat=\"groupName in groups.sorted_groups\" ng-init=\"groupPaths = groups[groupName]\">\n\t\t\t\t\t\t<legend ng-if=\"groupName\">{{groupName | camelcase }}</legend>\n\t\t\t\t\t\t\n\t\t\t\t\t\t<div ng-repeat=\"path in groupPaths.sorted_paths\" ng-init=\"pathData = groupPaths[path]\"> \n\t \t\t\t\t\t\t<!-- single instance subschema ! -->\n\t\t\t\t\t\t\t<deform-field  path=\"path\" field-schema=\"pathData\" model-schema=\"$form.modelSchema\" instance=\"instance\" ></deform-field>\n\t \t\t\t\t\t</div>  \n\t\t\t\t\t</fieldset>\n\t\t\t\t\t<div class=\"form-actions\">\n\t\t\t\t\t\t<button class=\"btn btn-success\"  type=\"submit\">Save </button>\n\t\t\t\t\t\t<button class=\"btn btn-danger\" type=\"button\" ng-click=\"cancelEdit()\">Cancel </button>\n\t\t\t\t\t</div>\n\t\t\t\t</form>\n\t\t\t\t<div class=\"clearfix\"></div>\n\t\t\t</div>\n\t\t</div>\n\t</div>\n\n\n","deform.edit.tpl":"<!------------- angoose-ui filename: ./ui-templates/deform.edit.tpl --><h1 class=\"list-heading\">Edit {{ $form.modelName }}</h1>\n<div class=\"container edit-container\">\n    <form class=\"deform-form form-horizontal \" name=\"modelForm\" ng-submit=\"saveForm()\">\n        <fieldset class=\"deform-set\" ng-repeat=\"groupName in groups.sorted_groups\" ng-init=\"groupPaths = groups[groupName]\">\n            <legend ng-if=\"groupName\">{{groupName | camelcase }}</legend>\n            <div ng-repeat=\"path in groupPaths.sorted_paths\" ng-init=\"pathData = groupPaths[path]\">\n                <deform-field  path=\"path\" field-schema=\"pathData\" model-schema=\"$form.modelSchema\" instance=\"instance\"  ></deform-field>\n            </div>\n        </fieldset>\n        <div class=\"form-actions\">\n            <button class=\"btn btn-success\"  type=\"submit\">Save </button>\n            <button class=\"btn btn-danger\" type=\"button\" ng-click=\"cancelEdit()\">Cancel </button>\n        </div>\n    </form>\n</div>\n\n","deform.field.checkbox.tpl":"<!------------- angoose-ui filename: tpl/deform.field.checkbox.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls\">\n    <input type=\"checkbox\">\n    <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n  </div>\n</div> \n\n","deform.field.datepicker.tpl":"<!------------- angoose-ui filename: tpl/deform.field.datepicker.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls controls-row\">\n  \t<input type=\"text\"  style=\"display:none\">\n  \t<input type=\"text\" readonly=\"true\" value=\"{{ (instance[path]  || instance.get(path)) | date:'medium'}}\" ng-click=\"openPicker()\">\n     <i class=\"icon-calendar\" style=\"font-size:150%; cursor:pointer\" ng-click=\"openPicker()\"></i>\n\t <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n  </div>\n</div>\n<script type=\"text/ng-template\"  id=\"datepicker-template-{{$id}}\">\n<div class=\"modal hide fade in span6\" tabindex=\"-1\" role=\"dialog\" style=\"display: block;\" aria-hidden=\"true\"  ng-controller=\"dfControllerDatepickerModal\">\n    <div class=\"modal-header\">\n        <button type=\"button\" class=\"close\" data-dismiss=\"modal\" ng-click=\"cancel()\"><i class=\"icon-remove\"></i></button>\n        <h3> <span> {{label}} </span></h3>\n    </div>\n    <div class=\"modal-content\" >\n        <div class=\"modal-body\" >\n\t\t\t<div class=\"row-fluid form\"  >\n\t\t\t\t<div class=\"control-group\"  >\n\t\t\t\t\t<div class=\"controls controls-row\">\n\t\t\t\t\t\t<div id=\"datepicker{{$id}}\" ng-class=\"showTimepicker?'span6':'span12'\" data-deform=\"appointment.$datepicker()\"  ></div>\n\t\t\t\t\t\t<div id=\"timepicker{{$id}}\" class=\"span6\" data-deform=\"appointment.$timepicker()\" ng-if=\"showTimepicker\" ></div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\t\t\t\t\t\t\t\t\t\t\t\t\n\t\t\t</div>\n        </div>\n    </div>\n    <div class=\"modal-footer\">\n        <span class=\"btn btn-success\" data-success=\"modal\" ng-click=\"ok()\" >Confirm</span>\n        <span class=\"btn\" data-dismiss=\"modal\" ng-click=\"cancel()\">Cancel</span>\n    </div>\n</div>\n \n</script>\n\n","deform.field.input.tpl":"<!------------- angoose-ui filename: tpl/deform.field.input.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls\">\n    <input type=\"text\"> <small>{{ fieldSchema.options && fieldSchema.options.description }}</small>\n    <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n  </div>\n</div>\n\n","deform.field.readonly.tpl":"<!------------- angoose-ui filename: tpl/deform.field.readonly.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls\">\n     {{ instance.get(path) }}\n  </div>\n</div> \n\n","deform.field.redactor.tpl":"<!------------- angoose-ui filename: ./ui-templates/deform.field.redactor.tpl --><div class=\"control-group redactor-container\">\n  <label class=\"control-label\"></label>\n  <div class=\"controls\" ng-class=\"{'error' : $field.$invalid && $field.$dirty }\">\n    <textarea  class=\"span6\" rows=\"5\"  cols=\"20\" rows=\"15\" redactor=\"\"></textarea>\n    <span class=\"help-inline\" ng-repeat=\"error in $fieldErrors\" >{{$validationMessages[error](this)}}</span>\n  </div>\n</div>\n \n\n","deform.field.s3file.tpl":"<!------------- angoose-ui filename: tpl/deform.field.s3file.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls\">\n    <input type=\"file\" ng-file-select=\"onFileUpload($files)\" > <small>{{ fieldSchema.options && fieldSchema.options.description }}</small>\n    <div class=\"file-preview\"  >\n    \t<img src=\"{{ instance.get(path) }}\" ng-if=\"instance.get(path).toLowerCase().indexOf('jpg')>0 || instance.get(path).toLowerCase().indexOf('png')>0 || instance.get(path).toLowerCase().indexOf('gif')>0\">\n    \t<audio controls ng-if=\"instance.get(path).toLowerCase().indexOf('ogg')>0 || instance.get(path).toLowerCase().indexOf('mp3')>0  \">\n\t\t  <source src=\"{{ instance.get(path) }}\" type=\"audio/ogg\" ng-if=\"instance.get(path).toLowerCase().indexOf('ogg')>0  \">\n\t\t  <source src=\"{{ instance.get(path) }}\" type=\"audio/mpeg\" ng-if=\"instance.get(path).toLowerCase().indexOf('mp3')>0 \">\n\t\t  Your browser does not support the audio tag.\n\t\t</audio>\n    </div>\n    <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n  </div>\n</div>\n\n\nhttp://www.w3schools.com/tags/horse.mp3\n\n","deform.field.select.tpl":"<!------------- angoose-ui filename: tpl/deform.field.select.tpl --><div class=\"control-group\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\"></label>\n  <div class=\"controls\">\n    <select ng-options=\"name for (name, value) in selectOptions\">\n    </select>\n    <span class=\"help-inline\" ng-repeat=\"error in $fieldErrors\">{{$validationMessages[error](this)}}</span>\n  </div>\n</div>\n\n","deform.field.selector.tpl":"<!------------- angoose-ui filename: tpl/deform.field.selector.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n    <label class=\"control-label\" >{{label}} </label>\n    <div class=\"controls\">\n        <input type=\"hidden\" ui-select2=\"select2options\">\n        <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n        <input ng-if=\"fieldSchema.options.required\" class=\"patch-for-select2\" style=\" z-index:-1 ;position: relative ;left: -20px ;max-width: 1px ;\" type=\"text\" value=\"{{$field.$viewValue}}\" required/>\n    </div>\n</div> \n\n","deform.field.textarea.tpl":"<!------------- angoose-ui filename: tpl/deform.field.textarea.tpl --><div class=\"control-group\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\"></label>\n  <div class=\"controls\">\n    <textarea  class=\"span6\" rows=\"5\"></textarea>\n    <span class=\"help-inline\" ng-repeat=\"error in $fieldErrors\">{{$validationMessages[error](this)}}</span>\n  </div>\n</div>\n\n","deform.field.url.tpl":"<!------------- angoose-ui filename: tpl/deform.field.url.tpl --><div class=\"control-group deform-field\" ng-class=\"{'error' : $field.$invalid && $field.$dirty, 'success' : $field.$valid && $field.$dirty}\">\n  <label class=\"control-label\" >{{label}} </label>\n  <div class=\"controls\">\n    <input type=\"text\"> <small>{{ fieldSchema.options && fieldSchema.options.description }}</small>\n    <div class=\"url\"  >\n    \t<img src=\"{{ instance.get(path) }}\" ng-if=\"instance.get(path).toLowerCase().indexOf('jpg')>0 || instance.get(path).toLowerCase().indexOf('png')>0 || instance.get(path).toLowerCase().indexOf('gif')>0\">\n    \t<audio controls ng-if=\"instance.get(path).toLowerCase().indexOf('ogg')>0 || instance.get(path).toLowerCase().indexOf('mp3')>0  \">\n\t\t  <source src=\"{{ instance.get(path) }}\" type=\"audio/ogg\" ng-if=\"instance.get(path).toLowerCase().indexOf('ogg')>0  \">\n\t\t  <source src=\"{{ instance.get(path) }}\" type=\"audio/mpeg\" ng-if=\"instance.get(path).toLowerCase().indexOf('mp3')>0 \">\n\t\t  Your browser does not support the audio tag.\n\t\t</audio>\n    </div>\n    <span ng-repeat=\"(key, error) in $field.$error\" ng-show=\"error && $field.$dirty\" class=\"help-inline\">{{$validationMessages[key]}}</span>\n  </div>\n</div>\n\n\nhttp://www.w3schools.com/tags/horse.mp3\n\n","deform.list.tpl":"<!------------- angoose-ui filename: ./ui-templates/deform.list.tpl --><div class=\"box\">\n    <h1 class=\"list-heading\">{{ dmeta.pageTitle }}</h1>\n\n    <div id=\"object-list\" class=\"container list-container\">\n        <div class=\"list-page-header\">\n            <span deform-paginator class=\"paging\" page-size=\"25\" ></span>\n            <a class=\"btn newOne btn-success\"  href=\"/angoose/{{ dmeta.modelName }}/create\"><i class=\"icon-plus\"></i> New {{ dmeta.modelName }}  </a>\n        </div>\n        <table class=\"table table-striped table-hover\">\n        <thead class=\"list-table-header\">\n          <tr>\n          \t<!--ng-click=\"sort($event, fieldSchema.path)\"-->\n            <th ng-repeat=\"fieldSchema in dmeta.columns\" \n            \tng-class=\"{'sort-clickable': fieldSchema.options.sortable }\"  >\n            \t<span deform-sortable=\"{{ fieldSchema.path }}\">\n            \t\t{{ fieldSchema.options.label }}\n            \t</span>\n            </th>\n            <th ng-if=\"dmeta.actionColumn\">Actions</th>\n          </tr>\n        </thead>\n        \n        <thead class=\"list-table-searcher\">\n\t\t\t<tr >\n\t\t\t\t<th ng-repeat=\"fieldSchema in dmeta.columns\" >\n\t\t\t\t\t\t<input type=\"text\" deform-filter-op=\"contains\" deform-filter-by=\"{{ fieldSchema.path }}\" placeholder=\"Search by {{ fieldSchema.options.label}}\" ng-show=\"searchable\">\n\t\t\t\t</th>\n\t\t\t\t<th>\n\t\t\t\t</th>\n\t\t\t</tr>\n\t\t</thead>\n        <tbody >\n          <tr ng-repeat=\"instance in instances\" ng-init=\"rowIndex=$index\">\n          \t<td ng-repeat=\"fieldSchema in dmeta.columns\" >\n          \t\t<a href=\"/angoose/{{ dmeta.modelName }}/view/{{ instance._id }}\">\n          \t\t<deform-render row=\"{{ rowIndex}}\">{{ value }}</deform-render>\n          \t\t</a>\n          \t</td>\n            <td  ng-if=\"dmeta.actionColumn\">\n              \t<deform-render row=\"{{rowIndex}}\" path=\"$ACTION\"></deform-render>\n            </td>\n          </tr>\n        </tbody>\n      </table>\n    </div>\n    <div class=\"box-header\">\n      <div class=\"box-icon\">\n        <span data-deform=\"$pager()\"></span>\n      </div>\n    </div>\n</div>\n\n\n<script type=\"text/ng-template\" id=\"deform-list-action-view-edit\">\n\t<a class=\"btn\"  href=\"/angoose/{{ dmeta.modelName}}/view/{{instance._id}}\">View</a> \n\t<a class=\"btn\"  href=\"/angoose/{{ dmeta.modelName}}/update/{{instance._id}}\">Edit</a>\n</script>\n<script type=\"text/ng-template\" id=\"deform-list-action-edit-delete\">\n\t<a class=\"btn btn-info\"  href=\"/angoose/{{ dmeta.modelName}}/update/{{instance._id}}\">Edit</a>  \n\t<span class=\"btn btn-danger\"  ng-click=\"remove($index)\" >Delete</span>\n</script>\n<script type=\"text/ng-template\" id=\"deform-list-action-view-edit-delete\">\n\t<a class=\"btn\"  href=\"/angoose/{{ dmeta.modelName}}/view/{{instance._id}}\">View</a> \n\t<a class=\"btn\"  href=\"/angoose/{{ dmeta.modelName}}/update/{{instance._id}}\">Edit</a>  \n\t<span class=\"btn btn-danger\"  ng-click=\"remove($index)\" >Delete</span>\n</script>\n\n\n","deform.sublist.tpl":"<!------------- angoose-ui filename: tpl/deform.sublist.tpl --><div class=\"control-group\">\n  <label class=\"control-label\">{{ subschema.options.label || 'missing model level schema label option' }}s</label>\n  <div class=\"controls\">\n  \t\t<fieldset class=\"deform-set\">\n  \t\t \t<div class=\"row-fluid box \"  ng-repeat=\"item in sublist($id)\">\n\t\t\t\t<div class=\"box-content\">\n\t\t\t\t\t<i class=\"icon-remove clickable icon-large\" ng-click=\"removeSublistItem($index)\"></i>\n\t\t\t\t\t<a type=\"button\" ng-model=\"item.__toggle\" btn-checkbox btn-checkbox-true=\"1\" btn-checkbox-false=\"0\">\n\t\t\t\t\t\t <span class=\"item-label\" >\n\t\t\t\t\t\t{{  getter(item, subschema.options.keyfield)  ||  ( (subschema.options.label || fieldSchema.path) + ' #'+($index+1)) }}\n\t\t\t\t\t\t </span>\n\t\t\t\t\t\t<i class=\"icon-expand-alt icon-large\"   ng-show=\"!item.__toggle\"></i> \n\t\t\t\t\t\t<i class=\"icon-collapse-alt icon-large\" ng-show=\"item.__toggle\"></i>\n\t\t\t\t\t</a>\n \t\t\t\t\t<div ng-repeat=\" (subpath, subpathSchema) in subschema.paths\" ng-show=\"item.__toggle\" >\n \t\t\t\t\t\t<span ng-if=\"subpath.indexOf('-')<0\">\n\t\t\t\t\t\t\t<deform-field  path=\"subpath\" field-schema=\"subpathSchema\" model-chema=\"modelSchema\" instance=\"item\"  ></deform>\n\t\t\t\t\t\t</span>\n \t\t\t\t\t</div>  \n\t\t\t\t\t<div class=\"clearfix\"></div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t\t<button class=\"btn btn-small\" type=\"button\" ng-click=\"addSublistItem()\">New {{ subschema.options.label || fieldSchema.path }} <i class=\"icon-plus icon-large\"></i></button>\n\t\t</fieldset>\n        \n    </div>\n     \n</div> \n\n","deform.subschema.tpl":"<!------------- angoose-ui filename: tpl/deform.subschema.tpl --> \n<div deform-subschema>\n\t<div class=\"row-fluid\">\n\t\t<h4>\n\t\t</h4>\n\t</div>\t\n\t<div class=\"row-fluid tab-content\">\n\t\t<div class=\"box\">\n\t\t\t<div class=\"box-header\">\n\t\t\t\t<h2><i class=\"icon-list\"></i><span class=\"break\"></span>\n\t\t\t\t\t<span ng-if=\"isNew\">Create </span>\n\t\t\t\t\t<span ng-if=\"!isNew\">Edit </span>\n\t\t\t\t\t{{ dmeta.modelName }} </h2>\n\t\t\t</div>\n\t\t\t<div class=\"box-content\">\n\t\t\t\t<form class=\"deform-form form-horizontal span12\" name=\"modelForm\" ng-submit=\"saveForm()\">\n\t\t\t\t\t<fieldset class=\"deform-set\" ng-repeat=\"(groupName, groupPaths) in groups\">\n\t\t\t\t\t\t<legend ng-if=\"groupName\">{{groupName | camelcase }}</legend>\n\t \t\t\t\t\t<div ng-repeat=\"(path, pathData) in groupPaths\">\n\t \t\t\t\t\t\t<span ng-if=\"pathData.schema\">\n\t\t \t\t\t\t\t\t\t<deform-field ng-model=\"instance.{{path}}\" path=\"path\" field-schema=\"pathData\" model-chema=\"modelClass.schema\" instance=\"instance\" template=\"\" directive=\"\" label=\"\" controller=\"\"></deform>\n\t\t\t\t\t\t\t</span>\n\t \t\t\t\t\t</div>  \n\t\t\t\t\t</fieldset>\n\t\t\t\t\t<div class=\"form-actions\">\n\t\t\t\t\t\t<button class=\"btn btn-success\"  type=\"submit\">Save </button>\n\t\t\t\t\t\t<a  class=\"btn btn-inverse \" href=\"/angoose/{{ dmeta.modelName }}/list\">Cancel</a>\n\t\t\t\t\t</div>\n\t\t\t\t</form>\n\t\t\t\t<div class=\"clearfix\"></div>\n\t\t\t</div>\n\t\t</div>\n\t</div>\n</div>\n\n","deform.view.tpl":"<!------------- angoose-ui filename: tpl/deform.view.tpl -->\t<div class=\"row-fluid\">\n\t\t<h4>\n\t\t</h4>\n\t</div>\t\n\t<div class=\"row-fluid tab-content\">\n\t\t<div class=\"box\">\n\t\t\t<div class=\"box-header\">\n\t\t\t\t<h2><i class=\"icon-list\"></i><span class=\"break\"></span>{{ dmeta.modelName }} Information</h2>\n\t\t\t</div>\n\t\t\t<div class=\"box-content\">\n\t\t\t\t<form class=\"deform-form form-horizontal span12 readonly\" name=\"modelForm\" ng-submit=\"saveForm()\">\n\t\t\t\t\t<fieldset class=\"deform-set\" ng-repeat=\"(groupName, groupPaths) in groups\">\n\t\t\t\t\t\t<legend ng-if=\"groupName\">{{groupName | camelcase }}</legend>\n\t \t\t\t\t\t<div ng-repeat=\"(path, pathData) in groupPaths\">\n\t \t\t\t\t\t\t<!-- single instance sub schema -->\n\t\t\t\t\t\t\t<deform-field ng-model=\"instance.{{path}}\" path=\"path\" field-schema=\"pathData\" model-schema=\"dmeta.modelSchema\" instance=\"instance\" ></deform>\n\t \t\t\t\t\t</div>  \n\t\t\t\t\t</fieldset>\n\t\t\t\t\t<div class=\"form-actions\">\n\t\t\t\t\t\t<a class=\"btn btn-success\" href=\"/angoose/{{ dmeta.modelName}}/update/{{ instance._id }}\"  >   Edit {{ dmeta.modelName }}  </a>\n\t\t\t\t\t\t<a class=\"btn btn-inverse\" href=\"/angoose/{{ dmeta.modelName}}/list\"  > Return </a>\n\t\t\t\t\t</div>\n\t\t\t\t</form>\n\t\t\t\t<div class=\"clearfix\"></div>\n\t\t\t</div>\n\t\t</div>\n\t</div>\n\n\n"}; // this will be replaced
+    if(!name) return;
+    if(content){
+        $angooseTemplateCache.templates[name]  = content;
+    } 
+    else {
+        return $angooseTemplateCache.templates[name];
+    }
+}
