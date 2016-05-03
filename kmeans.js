@@ -5,7 +5,7 @@ var kmeans = require('node-kmeans');
 var jsonfile = require('jsonfile');
 var async = require('async');
 //connect mongodb
-mongoose.connect('mongodb://localhost/Dataset');
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -92,7 +92,7 @@ function calculate_kmeans(VectorMacro,VectorId) {
                       'IdCluster' : IdCluster,
                       'MacroCluster' : MacroCluster
                     }
-
+                    console.log(newdata);
       saveVenues(new cluster(newdata));
 //      console.log(IdCluster);
   //    console.log(MacroCluster);
@@ -108,6 +108,8 @@ var VectorId=[];
 //global variables
 var WeightedList = [];
 var VectorZero=[0,0,0,0,0,0,0,0];
+var count2=0
+var count3=0;
 //definition and start stream
 var stream = usertimeline.find().stream();
 stream.on('data',function(doc2) {
