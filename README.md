@@ -51,7 +51,12 @@ In un altro file viene inoltre salvato l'utente selezionato, con tutti i luoghi 
 -------------------
 Tutti i risultati ottenuti salvati sul db vengono letti tramite delle funzioni specifiche che inviano i dati a una pagina html che permette di visualizzarli sia tramite una lista con i rispettivi nomi dei luogni restituiti, sia tramite una mappa che utilizzando i dati di latitudine e longitudine permette di visualizzare i rispettivi luoghi sulla mappa con dei marker contrassegnati dal nome del luogo di interesse.
 
+![Mappa con i punti di interresse](screanshot/one.png)
+------------------
+
+![Elenco punti di interresse](screanshot/two.png)
+------------------
+
 ##Sviluppi futuri
 -------------------
 E' stato inserito nell'interfaccia grafica un login che può permettere, tramite ulteriori sviluppi, di identificare l'utente che si logga e di restituire per quell'utente direttamente la lista dei luoghi consigliati.Inoltre, potrebbe essere possibile poter selezionare dalla lista il luogo al quale l'utente è interessato e mostrare oltre delle informazioni extra, anche il percorso da dove si trova l'utente in quel momento al punto di interesse selezionato
-

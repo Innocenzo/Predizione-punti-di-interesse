@@ -6,7 +6,7 @@ var uniqueValidator = require('mongoose-unique-validator');
 
 //connect mongodb
 
-mongoose.connect('mongodb://localhost/Dataset');
+mongoose.connect('mongodb://localhost/DataSet');
 var db = mongoose.connection;
 db.on('error', console.error.bind(console, 'connection error:'));
 db.once('open', function (callback) {
@@ -37,8 +37,8 @@ var instagramIdSchema2 = new Schema({
              foursquare_v2_id: { type: String, required: true, unique: true },
              category_place: String,
              name: String,
-             latitude: String,
-             longitude:String,
+             latitude: Number,
+             longitude:Number,
              macrocategory: String
 
 	});

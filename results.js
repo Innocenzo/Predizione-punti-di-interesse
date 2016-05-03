@@ -24,7 +24,7 @@ console.log('connection successful!');
                          var stream2 = InstagramId.find({id: doc.list_raccomended[i].place}).stream();
                          stream2.on('data', function (doc2) {
                            console.log(doc2.id+"   "+doc2.latitude+"   "+doc2.longitude +"   "+doc2.name);
-                            updateResult(i,doc2.id,doc2.latitude,doc2.longitude,doc2.name);
+                            updateResult(doc2.id,doc2.latitude,doc2.longitude,doc2.name,doc2.macrocategory);
 
                       }).on('error', function (err) {
 
@@ -45,9 +45,12 @@ var Schema = mongoose.Schema;
 var instagramIdSchema = new Schema({
              id:  { type: String, required: true, unique: true },
              foursquare_v2_id: { type: String, required: true, unique: true },
+             category_place: String,
+             name: String,
              latitude: Number,
-             longitude: Number,
-             name: String
+             longitude:Number,
+             macrocategory: String
+
 	});
 
 
@@ -60,7 +63,7 @@ var raccomendedcategorySchema = new Schema({
 
 // Apply the uniqueValidator plugin to venueSchema.
 instagramIdSchema.plugin(uniqueValidator);
-var InstagramId = mongoose.model('instagram_venues', instagramIdSchema);
+var InstagramId = mongoose.model('instagram_venues_macrocategory', instagramIdSchema);
 
 raccomendedcategorySchema.plugin(uniqueValidator);
 var raccomendedcategory = mongoose.model('raccomendedcategory', raccomendedcategorySchema);
@@ -70,10 +73,10 @@ var raccomendedcategory = mongoose.model('raccomendedcategory', raccomendedcateg
   var l=0;
 
 
-function updateResult(i,id,latitude,longitude,name){
+function updateResult(id,latitude,longitude,name,macrocategory){
             raccomendedcategory.findOneAndUpdate(
               {"list_raccomended.place": id } ,
-              { "list_raccomended.$.name": name,"list_raccomended.$.latitude": latitude,"list_raccomended.$.longitude": longitude},
+              { "list_raccomended.$.name": name,"list_raccomended.$.latitude": latitude,"list_raccomended.$.longitude": longitude,"list_raccomended.$.macrocategory": macrocategory},
               { runValidators: true, context: 'query' ,upsert:true,new:true,multi: true},
               function(err) {
                 if (err) {
