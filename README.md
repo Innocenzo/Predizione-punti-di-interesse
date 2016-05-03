@@ -49,7 +49,8 @@ In un altro file viene inoltre salvato l'utente selezionato, con tutti i luoghi 
 
 ##Interfaccia grafica e restituzione dei risultati
 -------------------
-Tutti i risultati ottenuti salvati sul db vengono letti tramite delle funzioni specifiche che inviano i dati a una pagina html che permette di visualizzarli sia tramite una lista con i rispettivi nomi dei luogni restituiti, sia tramite una mappa che utilizzando i dati di latitudine e longitudine permette di visualizzare i rispettivi luoghi sulla mappa con dei marker contrassegnati dal nome del luogo di interesse.
+L'interfaccia grafica è stata sviluppata partendo da un progetto che utilizza delle librerie tra le quali express e angoose (angularjs e mongoose) il tutto utilizzando il pattern architetturale Model-View-Controller (MVC).
+Tutti i risultati ottenuti vengono visualizzati sia tramite una lista con i rispettivi nomi e categorie dei luoghi restituiti, sia tramite una mappa che utilizzando i dati di latitudine e longitudine che permette di visualizzare i rispettivi luoghi sulla mappa con dei marker contrassegnati dal nome del luogo di interesse. Alla fine prendendo il profilo di un utente che nella sua timeline ha fatto il check-in solamente nella categoria vita notturna il nostro sistema ci suggerisce i seguenti risultati:
 
 ![Mappa con i punti di interresse](screanshot/one.png)
 ------------------
