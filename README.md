@@ -78,10 +78,15 @@ Esempi di utenti
 * "ristoranti" : 0;
 
 **Similarità utenti**:
+
 **Utente** : 219671101, similarity: 1,
+
 **Utente** : 557445642, similarity: 1,
+
 **Utente** : 384202905, similarity: 1,
+
 **Utente** : 1434160162, similarity: 1,
+
 **Utente** : 414515034, similarity: 1;
 
 **Luoghi consigliati**:
@@ -100,11 +105,16 @@ Esempi di utenti
 * "caffè" : 0,
 * "ristoranti" : 5;
 
-**Similarità**: -
+**Similarità**:
+
 **Utente** : 1067736539, similarity: 1,
+
 **Utente** : 405112120, similarity: 1,
+
 **Utente** : 1504450751, similarity: 0.999,
+
 **Utente** : 214526777, similarity: 0.999,
+
 **Utente** : 204570, similarity: 0.992;
 
 **Luoghi consigliati**:
@@ -125,10 +135,15 @@ Esempi di utenti
 * "ristoranti" : 5;
 
 **Similarità**:
+
 **Utente** : 1161891, similarity: 0.966,
+
 **Utente** : 37624290, similarity: 0.96,
+
 **Utente** : 47093786, similarity: 0.955,
+
 **Utente** : 29600511, similarity: 0.949,
+
 **Utente** : 1413022832, similarity: 0.942;
 
 **Luoghi consigliati**:
