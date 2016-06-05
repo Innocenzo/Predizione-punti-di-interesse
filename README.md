@@ -105,7 +105,7 @@ Esempi di utenti
 * "caffè" : 0,
 * "ristoranti" : 5;
 
-**Similarità**:
+**Similarità utenti**:
 
 **Utente** : 1067736539, similarity: 1,
 
@@ -134,7 +134,7 @@ Esempi di utenti
 * "caffè" : 0,
 * "ristoranti" : 5;
 
-**Similarità**:
+**Similarità utenti**:
 
 **Utente** : 1161891, similarity: 0.966,
 
