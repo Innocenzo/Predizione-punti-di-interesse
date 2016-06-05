@@ -67,29 +67,77 @@ Esempi di utenti
 **Utente**
 * 370295607
 
-**Interessi**:"monumento/punto di riferimento" : 0,"shopping" : 0,"Parchi" : 5,"interessi culturali" : 0,"divertimento" : 0, "vita notturna" : 0,"caffè" : 0,"ristoranti" : 0;
+**Interessi**
+* "monumento/punto di riferimento" : 0,
+* "shopping" : 0,
+* "Parchi" : 5,
+* "interessi culturali" : 0,
+* "divertimento" : 0,
+* "vita notturna" : 0,
+* "caffè" : 0,
+* "ristoranti" : 0;
 
-**Similarità**: -219671101, similarity: 1, -557445642, similarity: 1, -384202905, similarity: 1, -1434160162, similarity: 1, -414515034, similarity: 1;
+**Similarità utenti**:
+**Utente** : 219671101, similarity: 1,
+**Utente** : 557445642, similarity: 1,
+**Utente** : 384202905, similarity: 1,
+**Utente** : 1434160162, similarity: 1,
+**Utente** : 414515034, similarity: 1;
 
-**Luoghi consigliati**:"Parchi" : Parco Lanciani, Villa Paganini, Parco Santa Maria della Pietà, Parco della Pace, Parco dei Martiri di Forte Bravetta, Floracult, Villa Carpegna;
+**Luoghi consigliati**:
+* "Parchi" : Parco Lanciani, Villa Paganini, Parco Santa Maria della Pietà, Parco della Pace, Parco dei Martiri di Forte Bravetta, Floracult, Villa Carpegna;
 
 **Utente**
 * 17563068
 
-**Interessi**:"monumento/punto di riferimento" : 0,"shopping" : 1,"Parchi" : 0,"interessi culturali" : 0,"divertimento" : 0, "vita notturna" : 0,"caffè" : 0,"ristoranti" : 5;
+**Interessi**:
+* "monumento/punto di riferimento" : 0,
+* "shopping" : 1,
+* "Parchi" : 0,
+* "interessi culturali" : 0,
+* "divertimento" : 0,
+* "vita notturna" : 0,
+* "caffè" : 0,
+* "ristoranti" : 5;
 
-**Similarità**: -1067736539, similarity: 1, -405112120, similarity: 1, -1504450751, similarity: 0.999, -214526777, similarity: 0.999, -204570, similarity: 0.992;
+**Similarità**: -
+**Utente** : 1067736539, similarity: 1,
+**Utente** : 405112120, similarity: 1,
+**Utente** : 1504450751, similarity: 0.999,
+**Utente** : 214526777, similarity: 0.999,
+**Utente** : 204570, similarity: 0.992;
 
-**Luoghi consigliati**:"Ristoranti" : Trapizzino, Creperia Michelangelo, Pizzarium, Ristorante Bar Alì Baba, Il Fico D'India, Los Cabos Tex Mex, Pietralata Pizzeria di Quartiere, Albaruja, Cripsy Amsterdam, Le Coq, Burger King, Alice Pizza Quattro venti, Xinyuan Nuova Fonte; "shopping": La Pasticceria di Montarsino, Pasticceria Siciliana, Eataly, Castroni, Faro del Giannicolo, Panificio new F.lli Carpiceti
+**Luoghi consigliati**:
+* "Ristoranti" : Trapizzino, Creperia Michelangelo, Pizzarium, Ristorante Bar Alì Baba, Il Fico D'India, Los Cabos Tex Mex, Pietralata Pizzeria di Quartiere, Albaruja, Cripsy Amsterdam, Le Coq, Burger King, Alice Pizza Quattro venti, Xinyuan Nuova Fonte;
+* "shopping": La Pasticceria di Montarsino, Pasticceria Siciliana, Eataly, Castroni, Faro del Giannicolo, Panificio new F.lli Carpiceti
 
 **Utente**
 * 53734857
 
-**Interessi**:"monumento/punto di riferimento" : 4,"shopping" : 16,"Parchi" : 1,"interessi culturali" : 0,"divertimento" : 0, "vita notturna" : 5,"caffè" : 0,"ristoranti" : 5;
+**Interessi**:
+* "monumento/punto di riferimento" : 4,
+* "shopping" : 16,
+* "Parchi" : 1,
+* "interessi culturali" : 0,
+* "divertimento" : 0,
+* "vita notturna" : 5,
+* "caffè" : 0,
+* "ristoranti" : 5;
 
-**Similarità**: -1161891, similarity: 0.966, -37624290, similarity: 0.96, -47093786, similarity: 0.955, -29600511, similarity: 0.949, -1413022832, similarity: 0.942;
+**Similarità**:
+**Utente** : 1161891, similarity: 0.966,
+**Utente** : 37624290, similarity: 0.96,
+**Utente** : 47093786, similarity: 0.955,
+**Utente** : 29600511, similarity: 0.949,
+**Utente** : 1413022832, similarity: 0.942;
 
-**Luoghi consigliati**:"Shopping": Selfie, Centro Commerciale Euroma2, Bakery House, Mamma che Pane, Studio 74 I Parrucchieri, Ibs.it Bookshop, Arion, Eataly; "Parchi": Villa Ada, Parco Giochi Torresina; "monumento/punto di riferimento": Piazza San Pietro, Piazza Clemente XI, via Indro Montanelli; "divertimento": Stadio Olimpico; "ristoranti": La Romanina, Anema e Cozze, Futurarte, Mamma Che Pizza, Xin Yuan; "vita notturna": Futurarte, Fiesta Tropical, Kino Village; "interessi culturali": Galaxy,WSP photography;
+**Luoghi consigliati**:
+* "Shopping": Selfie, Centro Commerciale Euroma2, Bakery House, Mamma che Pane, Studio 74 I Parrucchieri, Ibs.it Bookshop, Arion, Eataly;
+* "Parchi": Villa Ada, Parco Giochi Torresina; "monumento/punto di riferimento": Piazza San Pietro, Piazza Clemente XI, via Indro Montanelli;
+* "divertimento": Stadio Olimpico;
+* "ristoranti": La Romanina, Anema e Cozze, Futurarte, Mamma Che Pizza, Xin Yuan;
+* "vita notturna": Futurarte, Fiesta Tropical, Kino Village;
+* "interessi culturali": Galaxy,WSP photography;
 
 Qui sono riportati solo alcuni esempi per rappresentare i risultati
 
