@@ -1,6 +1,6 @@
 var mongoose = require('mongoose');
 var uniqueValidator = require('mongoose-unique-validator');
-var foursquare = (require('foursquarevenues'))('WUU3GJDZ4JS2CU04VGSRLGSQQJU5GK4XYFDUUHZ0HIVVG1BS', 'KLNEANMQTI0ZJILE2YJ4JQTE3YE0ZN0XJCEV3PYCISCYL1EW');
+var foursquare = (require('foursquarevenues'))('', '');
 
 /**
  * access to mongodb
